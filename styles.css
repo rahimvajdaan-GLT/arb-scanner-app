@@ -46,12 +46,17 @@ button { cursor: pointer; }
 .mode-btn.active { background: var(--blue); color: white; }
 .form-grid { display: grid; gap: 16px; }
 .top-fields { grid-template-columns: 1.5fr 1fr 1fr; margin-bottom: 18px; }
-.live-controls { grid-template-columns: 1fr 1fr 1fr; margin-bottom: 4px; }
+.live-controls { grid-template-columns: repeat(3, minmax(0,1fr)); margin-bottom: 4px; }
 label { display: grid; gap: 8px; }
 label > span { color: var(--muted); font-size: 12px; font-weight: 700; }
 input, select { width: 100%; min-height: 46px; border-radius: 12px; border: 1px solid var(--line); color: white; background: #0f1731; padding: 11px 13px; outline: none; }
 input:focus, select:focus { border-color: rgba(110,139,255,.7); box-shadow: 0 0 0 3px rgba(110,139,255,.12); }
 select option { background: #0f1731; color: white; }
+.readout { min-height: 46px; display: flex; align-items: center; padding: 11px 13px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.025); color: var(--muted); }
+.toggle-label { align-content: start; }
+.toggle-row { min-height: 46px; display: flex; align-items: center; gap: 10px; padding: 11px 13px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.025); }
+.toggle-row input { width: 18px; min-height: 18px; height: 18px; margin: 0; }
+.toggle-row span { color: var(--muted); font-size: 13px; }
 .money-input { position: relative; }
 .money-input span { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--green); font-size: 12px; font-weight: 800; }
 .money-input input { padding-left: 48px; }
