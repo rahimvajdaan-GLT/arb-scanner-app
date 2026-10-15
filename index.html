@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Sports arbitrage scanner and calculator." />
-  <title>Arb Scanner</title>
+  <meta name="description" content="Professional sports arbitrage scanner and stake calculator." />
+  <title>ArbScope — Live Arbitrage Scanner</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -13,41 +13,104 @@
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand-wrap"><div class="brand-mark">A</div><div><div class="brand">Arb Scanner</div><div class="brand-sub">Live + Manual</div></div></div>
+      <div class="brand-wrap">
+        <div class="brand-mark">A</div>
+        <div><div class="brand">ArbScope</div><div class="brand-sub">Opportunity Intelligence</div></div>
+      </div>
+
       <nav class="nav">
-        <button class="nav-item active" data-scroll="liveScanner">Live Scanner</button>
-        <button class="nav-item" data-scroll="calculator">Calculator</button>
-        <button class="nav-item" data-scroll="results">Results</button>
-        <button class="nav-item" data-scroll="guide">How it works</button>
+        <button class="nav-item active" data-scroll="liveScanner"><span>◎</span> Live Scanner</button>
+        <button class="nav-item" data-scroll="calculator"><span>∑</span> Calculator</button>
+        <button class="nav-item" data-scroll="guide"><span>?</span> Methodology</button>
       </nav>
-      <div class="side-note"><strong>LIVE</strong><span>Live opportunities come from PuntersEdge through the secure Vercel API route.</span></div>
+
+      <div class="sidebar-status">
+        <div class="status-dot"></div>
+        <div><strong>Feed connected</strong><span>Secure server-side API</span></div>
+      </div>
+
+      <div class="side-note">
+        <strong>Execution note</strong>
+        <span>Always verify odds, limits and settlement rules before placing any wager.</span>
+      </div>
     </aside>
 
     <main class="main">
       <header class="topbar">
-        <div><div class="eyebrow">SPORTS ARBITRAGE TOOL</div><h1>Live arbitrage scanner</h1><p>Compare bookmaker prices, identify theoretical arbitrage, and calculate stake splits.</p></div>
+        <div>
+          <div class="eyebrow">REAL-TIME MARKET MONITOR</div>
+          <h1>Arbitrage opportunity dashboard</h1>
+          <p>Scan supported sportsbooks, rank opportunities by effective ROI, and generate conservative stake plans from live prices.</p>
+        </div>
         <div class="status-pill" id="liveStatus">● Ready</div>
       </header>
 
-      <section class="card" id="liveScanner">
-        <div class="section-head">
-          <div><div class="eyebrow">LIVE ODDS</div><h2>Live Arbitrage Opportunities</h2><p>Scan a supported sport, filter by bookmaker, and only show opportunities above your minimum ROI.</p></div>
+      <section class="metric-strip" aria-label="Live scanner metrics">
+        <div class="metric-card"><span>Opportunities</span><strong id="metricCount">—</strong><small>matching current filters</small></div>
+        <div class="metric-card"><span>Best ROI</span><strong id="metricBestRoi">—</strong><small>effective rounded ROI</small></div>
+        <div class="metric-card"><span>Best Profit</span><strong id="metricBestProfit">—</strong><small>at your selected stake</small></div>
+        <div class="metric-card"><span>Last Scan</span><strong id="metricLastScan">—</strong><small>local time</small></div>
+      </section>
+
+      <section class="card scanner-card" id="liveScanner">
+        <div class="section-head scanner-head">
+          <div>
+            <div class="eyebrow">LIVE ODDS</div>
+            <h2>Opportunity Scanner</h2>
+            <p>Use All Sports to surface the strongest available opportunities across the feed.</p>
+          </div>
+          <div class="scan-health"><span class="pulse"></span><span>Live feed</span></div>
         </div>
-        <div class="form-grid live-controls">
-          <label><span>Sport</span><select id="liveSport"><option value="">All supported sports</option><option value="nba">NBA</option><option value="nrl">NRL</option><option value="afl">AFL</option><option value="soccer_epl">English Premier League</option></select></label>
-          <label><span>Minimum profit %</span><input id="liveMinProfit" type="number" min="0" step="0.1" value="1" /></label>
-          <label><span>Your total stake (SAR)</span><input id="liveStake" type="number" min="1" step="1" value="1000" /></label>
-          <label><span>Bookmaker filter</span><input id="liveBookmaker" type="text" placeholder="e.g. tab, sportsbet" /></label>
-          <label class="toggle-label"><span>Auto refresh</span><div class="toggle-row"><input id="liveAutoRefresh" type="checkbox" /><span>Every 60 seconds</span></div></label>
-          <label><span>Last updated</span><div id="lastUpdated" class="readout">Not scanned yet</div></label>
+
+        <div class="filter-panel">
+          <div class="form-grid live-controls">
+            <label>
+              <span>Sport</span>
+              <select id="liveSport">
+                <option value="">All Sports</option>
+                <option value="nba">NBA</option>
+                <option value="nrl">NRL</option>
+                <option value="afl">AFL</option>
+                <option value="soccer_epl">English Premier League</option>
+              </select>
+            </label>
+            <label>
+              <span>Minimum ROI %</span>
+              <input id="liveMinProfit" type="number" min="0" step="0.1" value="0.5" />
+            </label>
+            <label>
+              <span>Total stake (SAR)</span>
+              <input id="liveStake" type="number" min="1" step="1" value="1000" />
+            </label>
+            <label>
+              <span>Bookmaker filter</span>
+              <input id="liveBooks" type="text" placeholder="All bookmakers" />
+            </label>
+          </div>
+
+          <div class="filter-footer">
+            <button id="scanLiveBtn" class="primary-btn scan-btn" type="button"><span class="btn-icon">⌁</span> Scan Live Opportunities</button>
+            <label class="toggle-row" for="autoRefresh">
+              <input id="autoRefresh" type="checkbox" />
+              <span class="toggle-ui"></span>
+              <span class="toggle-copy"><strong>Auto refresh</strong><small>Every 60 seconds</small></span>
+            </label>
+            <div class="last-updated"><span>Last updated</span><strong id="lastUpdated">Not yet scanned</strong></div>
+          </div>
         </div>
-        <div class="actions-row"><button id="scanLiveBtn" class="primary-btn" type="button">Scan Live Opportunities</button></div>
-        <div id="liveMessage" class="empty-state live-message">Press “Scan Live Opportunities” to load current data.</div>
+
+        <div class="result-toolbar">
+          <div id="liveMessage" class="empty-state live-message">Ready to scan the current market.</div>
+          <div class="sort-label">Sorted by highest effective ROI</div>
+        </div>
         <div id="liveResults" class="live-results"></div>
       </section>
 
       <section class="card" id="calculator">
-        <div class="section-head"><div><h2>Manual Arbitrage Calculator</h2><p>Only compare the exact same event, market and settlement rules.</p></div><div class="mode-switch" role="group" aria-label="Market type"><button id="twoWayBtn" class="mode-btn active" type="button">2-way</button><button id="threeWayBtn" class="mode-btn" type="button">3-way</button></div></div>
+        <div class="section-head">
+          <div><div class="eyebrow">MANUAL TOOL</div><h2>Arbitrage Calculator</h2><p>Validate a specific market or manually model odds before execution.</p></div>
+          <div class="mode-switch" role="group" aria-label="Market type"><button id="twoWayBtn" class="mode-btn active" type="button">2-way</button><button id="threeWayBtn" class="mode-btn" type="button">3-way</button></div>
+        </div>
         <div class="form-grid top-fields">
           <label><span>Event</span><input id="eventName" type="text" placeholder="e.g. Arsenal vs Chelsea" /></label>
           <label><span>Market</span><select id="marketName"><option>Match Winner</option><option>Moneyline</option><option>Draw No Bet</option><option>Over / Under</option><option>Both Teams to Score</option><option>Custom</option></select></label>
@@ -58,12 +121,17 @@
       </section>
 
       <section class="results-grid" id="results">
-        <div class="card result-card hero-result"><div class="section-head compact"><div><div class="eyebrow">RESULT</div><h2 id="arbStatus">Enter odds to calculate</h2></div><div id="roiBadge" class="roi-badge neutral">—</div></div><div class="stats-grid"><div class="stat"><span>Arbitrage index</span><strong id="arbIndex">—</strong></div><div class="stat"><span>Guaranteed payout</span><strong id="guaranteedPayout">—</strong></div><div class="stat"><span>Estimated profit</span><strong id="estimatedProfit">—</strong></div><div class="stat"><span>ROI</span><strong id="roiValue">—</strong></div></div></div>
-        <div class="card"><div class="section-head compact"><div><div class="eyebrow">STAKE PLAN</div><h2>How much to place</h2></div></div><div id="stakePlan" class="stake-plan empty-state">Run a calculation to see the stake split.</div></div>
+        <div class="card result-card hero-result"><div class="section-head compact"><div><div class="eyebrow">CALCULATION RESULT</div><h2 id="arbStatus">Enter odds to calculate</h2></div><div id="roiBadge" class="roi-badge neutral">—</div></div><div class="stats-grid"><div class="stat"><span>Arbitrage index</span><strong id="arbIndex">—</strong></div><div class="stat"><span>Guaranteed payout</span><strong id="guaranteedPayout">—</strong></div><div class="stat"><span>Estimated profit</span><strong id="estimatedProfit">—</strong></div><div class="stat"><span>ROI</span><strong id="roiValue">—</strong></div></div></div>
+        <div class="card"><div class="section-head compact"><div><div class="eyebrow">STAKE PLAN</div><h2>Recommended split</h2></div></div><div id="stakePlan" class="stake-plan empty-state">Run a calculation to see the stake split.</div></div>
       </section>
 
-      <section class="card" id="guide"><div class="section-head"><div><h2>How the calculation works</h2><p>For decimal odds, an arbitrage exists when the sum of the inverse odds is below 1.</p></div></div><div class="formula-box"><code>2-way: 1 / Odds A + 1 / Odds B &lt; 1</code><code>3-way: 1 / Home + 1 / Draw + 1 / Away &lt; 1</code></div><div class="warning-box"><strong>Important</strong><p>This app shows mathematical outcomes only. Real-world results can differ because odds move, stakes can be rejected or limited, fees may apply, and bookmaker settlement rules may not match.</p></div></section>
-      <footer>Arb Scanner · Live + Manual</footer>
+      <section class="card" id="guide">
+        <div class="section-head"><div><div class="eyebrow">METHODOLOGY</div><h2>How the calculation works</h2><p>For decimal odds, an arbitrage exists when the sum of the inverse best prices is below 1.</p></div></div>
+        <div class="formula-box"><code>2-way: 1 / Odds A + 1 / Odds B &lt; 1</code><code>3-way: 1 / Home + 1 / Draw + 1 / Away &lt; 1</code></div>
+        <div class="warning-box"><strong>Execution risk</strong><p>The scanner identifies mathematical opportunities, not guaranteed real-world outcomes. Odds can move, markets may suspend, stakes can be limited or rejected, and bookmaker settlement rules can differ.</p></div>
+      </section>
+
+      <footer>ArbScope · Live market monitoring & manual arbitrage calculator</footer>
     </main>
   </div>
   <script src="app.js"></script>
