@@ -31,12 +31,15 @@
 
       <section class="card" id="liveScanner">
         <div class="section-head">
-          <div><div class="eyebrow">LIVE ODDS</div><h2>Live Arbitrage Opportunities</h2><p>Use a sport key such as <b>afl</b>, <b>nrl</b>, <b>nba</b> or <b>soccer_epl</b>. Leave blank to scan all supported sports.</p></div>
+          <div><div class="eyebrow">LIVE ODDS</div><h2>Live Arbitrage Opportunities</h2><p>Scan a supported sport, filter by bookmaker, and only show opportunities above your minimum ROI.</p></div>
         </div>
         <div class="form-grid live-controls">
-          <label><span>Sport key</span><input id="liveSport" type="text" placeholder="e.g. nrl" /></label>
-          <label><span>Minimum profit %</span><input id="liveMinProfit" type="number" min="0" step="0.1" value="0" /></label>
+          <label><span>Sport</span><select id="liveSport"><option value="">All supported sports</option><option value="nba">NBA</option><option value="nrl">NRL</option><option value="afl">AFL</option><option value="soccer_epl">English Premier League</option></select></label>
+          <label><span>Minimum profit %</span><input id="liveMinProfit" type="number" min="0" step="0.1" value="1" /></label>
           <label><span>Your total stake (SAR)</span><input id="liveStake" type="number" min="1" step="1" value="1000" /></label>
+          <label><span>Bookmaker filter</span><input id="liveBookmaker" type="text" placeholder="e.g. tab, sportsbet" /></label>
+          <label class="toggle-label"><span>Auto refresh</span><div class="toggle-row"><input id="liveAutoRefresh" type="checkbox" /><span>Every 60 seconds</span></div></label>
+          <label><span>Last updated</span><div id="lastUpdated" class="readout">Not scanned yet</div></label>
         </div>
         <div class="actions-row"><button id="scanLiveBtn" class="primary-btn" type="button">Scan Live Opportunities</button></div>
         <div id="liveMessage" class="empty-state live-message">Press “Scan Live Opportunities” to load current data.</div>
