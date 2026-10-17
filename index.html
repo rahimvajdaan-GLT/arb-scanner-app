@@ -38,7 +38,7 @@
         <div>
           <div class="eyebrow">REAL-TIME MARKET MONITOR</div>
           <h1>Arbitrage opportunity dashboard</h1>
-          <p>Scan supported sportsbooks, rank opportunities by effective ROI, and generate conservative stake plans from live prices.</p>
+          <p>Scan moneyline, spreads and totals across supported sportsbooks, then rank opportunities by effective ROI.</p>
         </div>
         <div class="status-pill" id="liveStatus">● Ready</div>
       </header>
@@ -55,7 +55,7 @@
           <div>
             <div class="eyebrow">LIVE ODDS</div>
             <h2>Opportunity Scanner</h2>
-            <p>Scan current prices, then refine results instantly without using another API request.</p>
+            <p>All Markets combines match-winner arbitrage with spread and totals line arbitrage.</p>
           </div>
           <div class="scan-health"><span class="pulse"></span><span>Live feed</span></div>
         </div>
@@ -73,8 +73,17 @@
               </select>
             </label>
             <label>
+              <span>Market</span>
+              <select id="liveMarket">
+                <option value="all">All Markets</option>
+                <option value="h2h">Match Winner / Moneyline</option>
+                <option value="spreads">Spreads / Handicaps</option>
+                <option value="totals">Totals / Over-Under</option>
+              </select>
+            </label>
+            <label>
               <span>Minimum ROI %</span>
-              <input id="liveMinProfit" type="number" min="0" max="50" step="0.1" value="0.5" inputmode="decimal" />
+              <input id="liveMinProfit" type="number" min="0" max="50" step="0.1" value="0.1" inputmode="decimal" />
             </label>
             <label>
               <span>Total stake (SAR)</span>
@@ -88,8 +97,8 @@
 
           <div class="preset-row" aria-label="Quick filters">
             <span class="preset-label">ROI presets</span>
-            <button class="chip-btn" type="button" data-roi="0.1">0.1%</button>
-            <button class="chip-btn active" type="button" data-roi="0.5">0.5%</button>
+            <button class="chip-btn active" type="button" data-roi="0.1">0.1%</button>
+            <button class="chip-btn" type="button" data-roi="0.5">0.5%</button>
             <button class="chip-btn" type="button" data-roi="1">1%</button>
             <button class="chip-btn" type="button" data-roi="2">2%</button>
             <span class="preset-divider"></span>
@@ -107,12 +116,13 @@
               <span class="toggle-ui"></span>
               <span class="toggle-copy"><strong>Auto refresh</strong><small>Every 60 seconds</small></span>
             </label>
+            <div class="scan-cost"><span>Scan scope</span><strong id="scanCostText">All Markets · 6 API credits</strong></div>
             <div class="last-updated"><span>Last updated</span><strong id="lastUpdated">Not yet scanned</strong></div>
           </div>
         </div>
 
         <div class="result-toolbar">
-          <div id="liveMessage" class="empty-state live-message">Ready to scan the current market.</div>
+          <div id="liveMessage" class="empty-state live-message">Ready to scan moneyline, spreads and totals.</div>
           <div class="sort-label">Sorted by highest effective ROI</div>
         </div>
         <div id="liveResults" class="live-results"></div>
