@@ -1,8 +1,22 @@
 .live-controls{grid-template-columns:1.05fr 1.15fr .78fr .9fr 1.12fr}
-.scan-cost{display:grid;gap:3px;padding:0 4px}.scan-cost span{font-size:10px;color:#8898b0}.scan-cost strong{font-size:11px;color:#315d96}
-.market-chip,.middle-chip{display:inline-flex;align-items:center;padding:4px 7px;border-radius:999px;font-size:9px;font-weight:800;letter-spacing:.04em;border:1px solid #dce7f5;background:#f2f7ff;color:#4d6f9f}
+.market-chip,.middle-chip,.guarantee-chip,.value-chip{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:9px;font-weight:800;letter-spacing:.04em;border:1px solid #dce7f5;background:#f2f7ff;color:#4d6f9f}
 .middle-chip{background:#ecfbf5;border-color:#ccefe1;color:#0a815c}
+.guarantee-chip{background:#eafaf4;border-color:#cdeee1;color:#087553}
+.value-chip{background:#f3f5f8;border-color:#dfe5ec;color:#6c788a}
 .event-meta{flex-wrap:wrap}
+.legend-inline{display:flex;align-items:center;gap:14px;flex-wrap:wrap;color:#71809a;font-size:10px;font-weight:700}
+.legend-inline span{display:inline-flex;align-items:center;gap:6px}
+.legend-dot{display:inline-block;width:8px;height:8px;border-radius:50%}
+.legend-dot.arb{background:#12b981;box-shadow:0 0 0 4px rgba(18,185,129,.10)}
+.legend-dot.value{background:#9aa8bb;box-shadow:0 0 0 4px rgba(154,168,187,.10)}
+.value-warning{margin:10px 0;padding:10px 12px;border-radius:10px;background:#f7f8fa;border:1px solid #e3e8ef;color:#6f7f99;font-size:10px;font-weight:600}
+.guaranteed-card{border-left:4px solid #12b981}
+.value-card{border-left:4px solid #b2bcc9}
+.scanner-head h2{font-size:24px}
+.result-toolbar{padding-bottom:4px}
+.filter-panel{border-radius:0}
+.sidebar .nav{margin-top:6px}
+.sidebar .nav-item{pointer-events:none;cursor:default}
 @media(max-width:1250px){.live-controls{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media(max-width:900px){.live-controls{grid-template-columns:repeat(2,minmax(0,1fr))}.scan-cost{padding:0}}
-@media(max-width:680px){.live-controls{grid-template-columns:1fr}.scan-cost{width:100%}}
+@media(max-width:900px){.live-controls{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){.live-controls{grid-template-columns:1fr}.legend-inline{width:100%;justify-content:flex-start}.live-card{padding:15px}.event-meta{gap:6px}}
