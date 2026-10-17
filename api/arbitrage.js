@@ -1,268 +1,181 @@
-async function readPayload(url, apiKey) {
-  const upstream = await fetch(url, { headers: { 'X-API-Key': apiKey } });
-  const contentType = upstream.headers.get('content-type') || '';
-  const payload = contentType.includes('application/json')
-    ? await upstream.json()
-    : { detail: await upstream.text() };
+const ENGINE = 'open-books-v1';
+const FUTURE_BUFFER_MS = 20 * 60 * 1000;
 
-  if (!upstream.ok) {
-    const error = new Error(payload?.title || payload?.error || 'PuntersEdge request failed');
-    error.status = upstream.status;
-    error.detail = payload?.detail || payload;
-    throw error;
-  }
-  return payload;
-}
+const SPORTS = {
+  nfl: { p: 889, d: 88808 }, ncaaf: { p: 880, d: 87637 },
+  nba: { p: 487, d: 42648 }, ncaab: { p: 493, d: 92483 },
+  mlb: { p: 246, d: 84240 }, nhl: { p: 1456, d: 42133 },
+  ufc: { p: 8676, d: 9034 }, boxing: { p: 1424, d: 9033 },
+  soccer_epl: { p: 1980, d: 40253 }, soccer_laliga: { p: 2196, d: 40031 },
+  soccer_bundesliga: { p: 1842, d: 40029 }, soccer_seriea: { p: 2436, d: 40030 },
+  soccer_ligue1: { p: 2036, d: 40032 }, soccer_mls: { p: 2143, d: 40828 },
+  soccer_uefa_champs_league: { p: 2627, d: 40685 },
+  soccer_uefa_europa_league: { p: 2630, d: 40688 },
+  tennis_atp: { p: 2417, d: 39992 }, tennis_wta: { p: 2421, d: 39993 },
+};
+const DEFAULT_SPORTS = ['soccer_epl','soccer_laliga','soccer_bundesliga','soccer_seriea','soccer_uefa_champs_league','nba','nfl','ncaaf','nhl','tennis_atp'];
+const PIN_BASE = 'https://guest.api.arcadia.pinnacle.com/0.1';
+const DK_BASE = 'https://sportsbook.draftkings.com/sites/US-SB/api/v5';
+// Public web-client guest header used by Pinnacle's own browser application; not a user credential.
+const PIN_HEADERS = {
+  'X-API-Key': 'CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R',
+  'Referer': 'https://www.pinnacle.com/', 'Origin': 'https://www.pinnacle.com',
+  'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 Chrome/124 Safari/537.36',
+};
+const WEB_HEADERS = { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 Chrome/124 Safari/537.36' };
 
-async function readArray(url, apiKey) {
-  const payload = await readPayload(url, apiKey);
-  return Array.isArray(payload) ? payload : [];
-}
-
-function deriveOptimalStakes(selections) {
-  const usable = (Array.isArray(selections) ? selections : [])
-    .map(sel => ({
-      name: sel.name,
-      point: sel.point,
-      price: Number(sel.best_price || sel.price || sel.odds || 0),
-      bookmaker: sel.best_bookmaker || sel.bookmaker || '',
-    }))
-    .filter(sel => sel.name && Number.isFinite(sel.price) && sel.price > 1);
-
-  if (usable.length < 2) return [];
-  const inverseSum = usable.reduce((sum, sel) => sum + (1 / sel.price), 0);
-  if (!Number.isFinite(inverseSum) || inverseSum >= 1) return [];
-
-  return usable.map(sel => ({
-    ...sel,
-    stake: ((1 / sel.price) / inverseSum) * 100,
-  }));
-}
-
-function normalizeHeadToHead(events) {
-  return (Array.isArray(events) ? events : []).map(event => ({
-    ...event,
-    raw_event_id: event.event_id || event.id || '',
-    market_type: event.market_type || 'h2h',
-    source_type: 'arb_sports',
-  }));
-}
-
-function normalizeBestOdds(events) {
-  return (Array.isArray(events) ? events : []).map(event => {
-    const selections = (Array.isArray(event.selections) ? event.selections : []).map(sel => ({
-      name: sel.name,
-      point: sel.point,
-      best_price: Number(sel.best_price || sel.price || 0),
-      best_bookmaker: sel.best_bookmaker || sel.bookmaker || '',
-    }));
-    const arbPct = Number(event.arb_profit_pct || event.arb_pct || 0);
-    return {
-      event_id: event.id || event.event_id || '',
-      raw_event_id: event.id || event.event_id || '',
-      sport_key: event.sport_key,
-      home_team: event.home_team,
-      away_team: event.away_team,
-      commence_time: event.commence_time,
-      market_type: 'h2h',
-      source_type: 'best_odds',
-      is_arb: event.arb_exists === true || arbPct > 0,
-      arb_pct: Number.isFinite(arbPct) ? arbPct : 0,
-      stale: event.stale === true,
-      data_age_seconds: Number(event.data_age_seconds || 0),
-      freshest_age_seconds: Number(event.freshest_age_seconds || 0),
-      selections,
-      optimal_stakes: deriveOptimalStakes(selections),
-    };
-  });
-}
-
-function normalizeLineArbs(events, requestedMode) {
-  const flattened = [];
-  (Array.isArray(events) ? events : []).forEach(event => {
-    const marketType = String(event.market_type || '').toLowerCase();
-    if (requestedMode === 'spreads' && marketType !== 'spreads') return;
-    if (requestedMode === 'totals' && marketType !== 'totals') return;
-
-    const opportunities = Array.isArray(event.opportunities) ? event.opportunities : [];
-    opportunities.forEach((opp, index) => {
-      const sides = [opp.side_a, opp.side_b].filter(Boolean);
-      const selections = sides.map(side => ({
-        name: side.name,
-        point: side.point,
-        best_price: Number(side.price || 0),
-        best_bookmaker: side.bookmaker || '',
-      }));
-
-      let optimalStakes = (Array.isArray(opp.optimal_stakes) ? opp.optimal_stakes : []).map(stake => {
-        const matchingSide = sides.find(side =>
-          String(side.name) === String(stake.name) &&
-          (stake.point == null || side.point == null || Number(side.point) === Number(stake.point))
-        ) || sides.find(side => String(side.name) === String(stake.name)) || {};
-        return {
-          ...stake,
-          price: Number(matchingSide.price || stake.price || stake.odds || 0),
-          point: stake.point ?? matchingSide.point,
-          bookmaker: stake.bookmaker || matchingSide.bookmaker || '',
-        };
-      });
-      if (!optimalStakes.length) optimalStakes = deriveOptimalStakes(selections);
-
-      flattened.push({
-        event_id: `${event.event_id || 'line'}-${marketType}-${index}`,
-        raw_event_id: event.event_id || event.id || '',
-        sport_key: event.sport_key,
-        home_team: event.home_team,
-        away_team: event.away_team,
-        commence_time: event.commence_time,
-        market_type: marketType || 'lines',
-        source_type: 'arb_lines',
-        status: opp.status ?? event.status,
-        state: opp.state ?? event.state,
-        is_live: opp.is_live ?? event.is_live,
-        in_play: opp.in_play ?? event.in_play,
-        started: opp.started ?? event.started,
-        completed: opp.completed ?? event.completed,
-        is_arb: opp.is_arb === true,
-        is_middle: opp.is_middle === true,
-        arb_pct: Number(opp.arb_pct || 0),
-        selections,
-        optimal_stakes: optimalStakes,
-      });
-    });
-  });
-  return flattened;
-}
-
-function eventKey(event) {
-  return [event.sport_key || '', event.home_team || '', event.away_team || '', event.market_type || 'h2h']
-    .join('|').toLowerCase();
-}
-
-function uniqueEvents(events) {
-  const seen = new Set();
-  const output = [];
-  for (const event of events) {
-    const key = eventKey(event);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    output.push(event);
-  }
-  return output;
-}
-
-function parseStartMs(value) {
-  if (!value) return NaN;
-  if (typeof value === 'number') return value > 1e12 ? value : value * 1000;
-  const raw = String(value).trim();
-  if (!raw) return NaN;
-  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw);
-  return Date.parse(hasZone ? raw : `${raw}Z`);
-}
-
-function isInPlayOrStarted(event) {
-  if (!event) return true;
-  const flags = [event.is_live, event.live, event.in_play, event.inplay, event.is_inplay, event.started, event.has_started, event.completed];
-  if (flags.some(value => value === true || value === 1 || String(value).toLowerCase() === 'true')) return true;
-  const statusText = [event.status, event.state, event.match_status, event.event_status, event.phase, event.market_status]
-    .filter(Boolean).join(' ').toLowerCase();
-  return /(in[-_ ]?play|live|started|playing|ongoing|half[-_ ]?time|halftime|finished|completed|ended)/i.test(statusText);
-}
-
-function isValidPrematchPositiveArb(event) {
-  if (!event || event.is_arb !== true || isInPlayOrStarted(event)) return false;
-  const profitPct = Number(event.arb_pct || event.arb_profit_pct || 0);
-  if (!Number.isFinite(profitPct) || profitPct <= 0) return false;
-  if (event.stale === true) return false;
-  const startMs = parseStartMs(event.commence_time);
-  if (!Number.isFinite(startMs)) return false;
-  // Keep a 20-minute safety window so borderline or delayed fixtures never appear as pre-match.
-  return startMs > Date.now() + 20 * 60_000;
-}
-
-async function loadSports(apiKey) {
-  const sports = await readArray('https://api.puntersedge.online/v1/sports', apiKey);
-  return sports.filter(s => s && s.key && s.active !== false);
-}
-
-async function findBestOddsArbs(apiKey, sportKey, target = 10) {
-  let sportKeys = [];
-  if (sportKey) {
-    sportKeys = [sportKey];
-  } else {
-    const sports = await loadSports(apiKey);
-    const active = sports.map(s => String(s.key));
-    const preferred = ['nba', 'nrl', 'afl', 'soccer_epl', 'tennis_atp', 'tennis_wta', 'ncaab', 'ncaaf', 'cricket', 'soccer_uefa_champs_league'];
-    sportKeys = [...preferred.filter(key => active.includes(key)), ...active.filter(key => !preferred.includes(key))].slice(0, 10);
-  }
-
-  const groups = await Promise.allSettled(sportKeys.map(async key => {
-    const events = await readArray(`https://api.puntersedge.online/v1/best-odds/${encodeURIComponent(key)}`, apiKey);
-    return normalizeBestOdds(events);
-  }));
-
-  const all = groups
-    .filter(result => result.status === 'fulfilled')
-    .flatMap(result => result.value)
-    .filter(isValidPrematchPositiveArb)
-    .sort((a, b) => Number(b.arb_pct || 0) - Number(a.arb_pct || 0));
-
-  return uniqueEvents(all).slice(0, target);
-}
-
-export default async function handler(req, res) {
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET');
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  const apiKey = process.env.PUNTERSEDGE_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'PUNTERSEDGE_API_KEY is not configured on the server.' });
-
-  const sportKey = typeof req.query.sport_key === 'string' ? req.query.sport_key.trim() : '';
-  const modeRaw = typeof req.query.market_mode === 'string' ? req.query.market_mode.trim().toLowerCase() : 'all';
-  const allowedModes = new Set(['all', 'h2h', 'lines', 'spreads', 'totals']);
-  const marketMode = allowedModes.has(modeRaw) ? modeRaw : 'all';
-  const params = new URLSearchParams({ min_profit_pct: '0', maxAgeMinutes: '360' });
-  if (sportKey) params.set('sport_key', sportKey);
-
+async function getJson(url, headers = WEB_HEADERS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8500);
   try {
-    const requests = [];
-    if (marketMode === 'all' || marketMode === 'h2h') {
-      requests.push(readArray(`https://api.puntersedge.online/v1/arb/sports?${params.toString()}`, apiKey).then(normalizeHeadToHead));
+    const r = await fetch(url, { headers, signal: controller.signal, redirect: 'follow' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  } finally { clearTimeout(timer); }
+}
+function startMs(v) { const t = Date.parse(String(v || '')); return Number.isFinite(t) ? t : NaN; }
+function decFromAmerican(v) {
+  const n = Number(v); if (!Number.isFinite(n) || n === 0) return null;
+  return n > 0 ? n / 100 + 1 : 100 / Math.abs(n) + 1;
+}
+function cleanName(v) {
+  return String(v || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/\b(fc|cf|afc|sc|ac|club|the)\b/g,' ').replace(/\bunited\b/g,'utd')
+    .replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+}
+function sameTeam(a,b) {
+  const x=cleanName(a), y=cleanName(b); if (!x || !y) return false;
+  if (x===y || x.replace(/\s/g,'')===y.replace(/\s/g,'')) return true;
+  if (x.length>4 && y.length>4 && (x.includes(y)||y.includes(x))) return true;
+  const A=new Set(x.split(' ')), B=new Set(y.split(' '));
+  return [...A].filter(t=>B.has(t)).length / Math.max(A.size,B.size,1) >= .6;
+}
+function fullGamePeriod(sport, period) {
+  const p=Number(period); return ['nba','ncaab'].includes(sport) ? (p===0||p===3) : p===0;
+}
+
+async function pinnacle(sport, league) {
+  const [matches, markets] = await Promise.all([
+    getJson(`${PIN_BASE}/leagues/${league}/matchups?brandId=0`, PIN_HEADERS),
+    getJson(`${PIN_BASE}/leagues/${league}/markets/straight?primaryOnly=false`, PIN_HEADERS),
+  ]);
+  if (!Array.isArray(matches) || !Array.isArray(markets)) return [];
+  const byId=new Map();
+  for (const m of markets) {
+    if (String(m?.type||'').toLowerCase()!=='moneyline' || !fullGamePeriod(sport,m?.period)) continue;
+    if (!byId.has(m.matchupId)) byId.set(m.matchupId,[]); byId.get(m.matchupId).push(m);
+  }
+  const out=[];
+  for (const m of matches) {
+    if (!m || m.parent || m.type==='special') continue;
+    const home=m.participants?.find(x=>x?.alignment==='home')?.name;
+    const away=m.participants?.find(x=>x?.alignment==='away')?.name;
+    if (!home||!away||!Number.isFinite(startMs(m.startTime))) continue;
+    const prices=[];
+    for (const market of byId.get(m.id)||[]) for (const p of market.prices||[]) {
+      const d=String(p?.designation||'').toLowerCase(), odds=decFromAmerican(p?.price);
+      if (!odds) continue;
+      const role=d==='home'?'home':d==='away'?'away':(d==='draw'||d==='tie')?'draw':null;
+      if (role) prices.push({role,odds,book:'Pinnacle'});
     }
-    if (marketMode === 'all' || marketMode === 'lines' || marketMode === 'spreads' || marketMode === 'totals') {
-      requests.push(readArray(`https://api.puntersedge.online/v1/arb/lines?${params.toString()}`, apiKey).then(events => normalizeLineArbs(events, marketMode)));
+    if (prices.length>=2) out.push({sport,home,away,time:m.startTime,book:'Pinnacle',prices});
+  }
+  return out;
+}
+
+function isMoneyline(label, cat) {
+  const s=`${label||''} ${cat||''}`.toLowerCase();
+  return /moneyline|money line|match winner|3-way|3 way|winner|to win/.test(s) && !/first|half|quarter|period|set /.test(s);
+}
+async function draftkings(sport, groupId) {
+  const data=await getJson(`${DK_BASE}/eventgroups/${groupId}?format=json`);
+  const root=data?.eventGroup||data, events=root?.events||[], cats=root?.offerCategories||[];
+  const offers=new Map();
+  for (const cat of cats) for (const desc of cat?.offerSubcategoryDescriptors||[])
+    for (const list of desc?.offerSubcategory?.offers||[]) for (const o of Array.isArray(list)?list:[]) {
+      if (!o?.eventId || !isMoneyline(o?.label,cat?.name)) continue;
+      if (!offers.has(o.eventId)) offers.set(o.eventId,[]); offers.get(o.eventId).push(o);
     }
-
-    const groups = await Promise.allSettled(requests);
-    let combined = groups
-      .filter(result => result.status === 'fulfilled')
-      .flatMap(result => result.value)
-      .filter(isValidPrematchPositiveArb);
-
-    // When the global arb endpoints return no genuine positive h2h arb, scan the provider's
-    // best-odds endpoint across active sports. This still returns only real positive arbs;
-    // it does not fill the board with value/negative opportunities.
-    if (combined.length < 10 && (marketMode === 'all' || marketMode === 'h2h')) {
-      const fallback = await findBestOddsArbs(apiKey, sportKey, 10);
-      combined = uniqueEvents([...combined, ...fallback]);
+  const out=[];
+  for (const e of events) {
+    const home=e?.teamName1||e?.team1, away=e?.teamName2||e?.team2;
+    if (!home||!away||!Number.isFinite(startMs(e?.startDate))) continue;
+    const prices=[];
+    for (const o of offers.get(e.eventId)||[]) for (const p of o?.outcomes||[]) {
+      const odds=Number(p?.oddsDecimal), name=String(p?.label||p?.participant||'');
+      if (!Number.isFinite(odds)||odds<=1) continue;
+      const role=sameTeam(name,home)?'home':sameTeam(name,away)?'away':/^(draw|tie)$/i.test(name)?'draw':null;
+      if (role) prices.push({role,odds,book:'DraftKings'});
     }
+    if (prices.length>=2) out.push({sport,home,away,time:e.startDate,book:'DraftKings',prices});
+  }
+  return out;
+}
 
-    combined = combined
-      .filter(isValidPrematchPositiveArb)
-      .sort((a, b) => {
-        const roiDiff = Number(b.arb_pct || 0) - Number(a.arb_pct || 0);
-        if (roiDiff !== 0) return roiDiff;
-        return parseStartMs(a.commence_time) - parseStartMs(b.commence_time);
-      });
+function matchEvent(buckets,e) {
+  const t=startMs(e.time);
+  return buckets.find(b => b.sport===e.sport && Math.abs(startMs(b.time)-t)<=20*60e3 &&
+    ((sameTeam(b.home,e.home)&&sameTeam(b.away,e.away))||(sameTeam(b.home,e.away)&&sameTeam(b.away,e.home))));
+}
+function merge(events) {
+  const buckets=[];
+  for (const e of events) {
+    let b=matchEvent(buckets,e);
+    if (!b) { b={sport:e.sport,home:e.home,away:e.away,time:e.time,prices:[]}; buckets.push(b); }
+    for (const p of e.prices) {
+      let role=p.role;
+      if (sameTeam(e.home,b.away)&&sameTeam(e.away,b.home)) role=role==='home'?'away':role==='away'?'home':role;
+      b.prices.push({...p,role});
+    }
+  }
+  return buckets;
+}
+function opportunity(b) {
+  const best={home:null,draw:null,away:null};
+  for (const p of b.prices) if (best[p.role]==null || p.odds>best[p.role].odds) best[p.role]=p;
+  const hasDraw=b.prices.some(p=>p.role==='draw');
+  const roles=hasDraw?['home','draw','away']:['home','away'];
+  if (roles.some(r=>!best[r])) return null;
+  const picks=roles.map(r=>({
+    name:r==='home'?b.home:r==='away'?b.away:'Draw', point:null,
+    best_price:Number(best[r].odds), best_bookmaker:best[r].book,
+  }));
+  if (new Set(picks.map(x=>x.best_bookmaker)).size<2) return null;
+  const inv=picks.reduce((s,x)=>s+1/x.best_price,0); if (!Number.isFinite(inv)||inv>=1) return null;
+  const roi=(1/inv-1)*100;
+  return {
+    event_id:`${b.sport}-${cleanName(b.home).replace(/\s/g,'')}-${cleanName(b.away).replace(/\s/g,'')}-${Math.round(startMs(b.time)/60000)}`,
+    sport_key:b.sport, home_team:b.home, away_team:b.away, commence_time:b.time,
+    market_type:'h2h', source_type:'open_books', is_arb:true, arb_pct:Number(roi.toFixed(3)),
+    selections:picks,
+    optimal_stakes:picks.map(x=>({name:x.name,point:null,price:x.best_price,bookmaker:x.best_bookmaker,stake:((1/x.best_price)/inv)*100})),
+  };
+}
+async function scanSport(key) {
+  const c=SPORTS[key]; if (!c) return [];
+  const settled=await Promise.allSettled([pinnacle(key,c.p),draftkings(key,c.d)]);
+  return settled.filter(x=>x.status==='fulfilled').flatMap(x=>x.value);
+}
 
-    res.setHeader('Cache-Control', 'no-store, max-age=0');
-    return res.status(200).json(combined.slice(0, 25));
-  } catch (error) {
-    return res.status(error.status || 500).json({
-      error: error.message || 'Unable to reach PuntersEdge',
-      detail: error.detail || error.message,
-    });
+export default async function handler(req,res) {
+  if (req.method!=='GET') { res.setHeader('Allow','GET'); return res.status(405).json({error:'Method not allowed'}); }
+  const sport=typeof req.query.sport_key==='string'?req.query.sport_key.trim():'';
+  const mode=typeof req.query.market_mode==='string'?req.query.market_mode.toLowerCase():'all';
+  if (sport&&!SPORTS[sport]) return res.status(400).json({error:`Unsupported sport_key: ${sport}`});
+  if (!['all','h2h','lines','spreads','totals'].includes(mode)) return res.status(400).json({error:'Unsupported market_mode'});
+  if (!['all','h2h'].includes(mode)) return res.status(200).json([]);
+  try {
+    const keys=sport?[sport]:DEFAULT_SPORTS;
+    const groups=await Promise.all(keys.map(scanSport));
+    const arbs=merge(groups.flat())
+      .filter(x=>startMs(x.time)>Date.now()+FUTURE_BUFFER_MS)
+      .map(opportunity).filter(Boolean)
+      .sort((a,b)=>Number(b.arb_pct)-Number(a.arb_pct)||startMs(a.commence_time)-startMs(b.commence_time))
+      .slice(0,50);
+    res.setHeader('Cache-Control','no-store, max-age=0');
+    res.setHeader('X-Odds-Engine',ENGINE); res.setHeader('X-Odds-Providers','Pinnacle,DraftKings');
+    return res.status(200).json(arbs);
+  } catch (e) {
+    return res.status(500).json({error:'Open odds scan failed',detail:e?.message||String(e),engine:ENGINE});
   }
 }
