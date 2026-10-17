@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Professional sports arbitrage scanner and stake calculator." />
+  <meta name="description" content="Kaka Arb live sports arbitrage scanner." />
   <title>Kaka Arb — Live Arbitrage Scanner</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,46 +17,50 @@
     <aside class="sidebar">
       <div class="brand-wrap">
         <div class="brand-mark">KA</div>
-        <div><div class="brand">Kaka Arb</div><div class="brand-sub">Opportunity Intelligence</div></div>
+        <div>
+          <div class="brand">Kaka Arb</div>
+          <div class="brand-sub">Live Arbitrage Scanner</div>
+        </div>
       </div>
+
       <nav class="nav">
         <button class="nav-item active" data-scroll="liveScanner"><span>◎</span> Live Scanner</button>
-        <button class="nav-item" data-scroll="calculator"><span>∑</span> Calculator</button>
-        <button class="nav-item" data-scroll="guide"><span>?</span> Methodology</button>
       </nav>
+
       <div class="sidebar-status">
         <div class="status-dot"></div>
-        <div><strong>Feed connected</strong><span>Secure server-side API</span></div>
+        <div><strong>Live data ready</strong><span>Secure odds feed connected</span></div>
       </div>
+
       <div class="side-note">
-        <strong>Execution note</strong>
-        <span>Only rows marked TRUE ARB are mathematical arbitrage. Value rows are comparisons, not guaranteed winners.</span>
+        <strong>Quick guide</strong>
+        <span>Green TRUE ARB cards are mathematical arbitrage candidates. Grey value cards are comparisons only.</span>
       </div>
     </aside>
 
     <main class="main">
       <header class="topbar">
         <div>
-          <div class="eyebrow">REAL-TIME MARKET MONITOR</div>
-          <h1>Top 10 arbitrage & value board</h1>
-          <p>True arbitrage is ranked first. If fewer than 10 surebets exist, the board fills the remaining slots with the strongest market comparisons and labels them clearly as not guaranteed.</p>
+          <div class="eyebrow">KAKA ARB · LIVE SCANNER</div>
+          <h1>Live Arbitrage Board</h1>
+          <p>Find the strongest available opportunities, compare bookmakers and see the exact stake split in one place.</p>
         </div>
         <div class="status-pill" id="liveStatus">● Ready</div>
       </header>
 
       <section class="metric-strip" aria-label="Live scanner metrics">
-        <div class="metric-card"><span>True Arbs</span><strong id="metricCount">—</strong><small>positive guaranteed setups</small></div>
-        <div class="metric-card"><span>Best Arb ROI</span><strong id="metricBestRoi">—</strong><small>effective rounded ROI</small></div>
-        <div class="metric-card"><span>Best Arb Profit</span><strong id="metricBestProfit">—</strong><small>at your selected stake</small></div>
-        <div class="metric-card"><span>Last Scan</span><strong id="metricLastScan">—</strong><small>local time</small></div>
+        <div class="metric-card"><span>True Arbs</span><strong id="metricCount">—</strong><small>current profitable setups</small></div>
+        <div class="metric-card"><span>Best ROI</span><strong id="metricBestRoi">—</strong><small>best current true arb</small></div>
+        <div class="metric-card"><span>Best Profit</span><strong id="metricBestProfit">—</strong><small>based on your stake</small></div>
+        <div class="metric-card"><span>Last Scan</span><strong id="metricLastScan">—</strong><small>your local time</small></div>
       </section>
 
       <section class="card scanner-card" id="liveScanner">
         <div class="section-head scanner-head">
           <div>
-            <div class="eyebrow">LIVE ODDS</div>
-            <h2>Opportunity Scanner</h2>
-            <p>All Markets combines match-winner arbitrage with spread and totals comparisons.</p>
+            <div class="eyebrow">SCAN SETTINGS</div>
+            <h2>Find Opportunities</h2>
+            <p>Choose your sport and market, set your stake, then scan.</p>
           </div>
           <div class="scan-health"><span class="pulse"></span><span>Live feed</span></div>
         </div>
@@ -73,37 +77,41 @@
                 <option value="soccer_epl">English Premier League</option>
               </select>
             </label>
+
             <label>
               <span>Market</span>
               <select id="liveMarket">
                 <option value="all">All Markets</option>
-                <option value="h2h">Match Winner / Moneyline</option>
+                <option value="h2h">Moneyline / Match Winner</option>
                 <option value="spreads">Spreads / Handicaps</option>
                 <option value="totals">Totals / Over-Under</option>
               </select>
             </label>
+
             <label>
-              <span>Minimum TRUE ARB ROI %</span>
+              <span>Minimum Arb ROI %</span>
               <input id="liveMinProfit" type="number" min="0" max="50" step="0.1" value="0.1" inputmode="decimal" />
             </label>
+
             <label>
-              <span>Total stake (SAR)</span>
+              <span>Total Stake (SAR)</span>
               <input id="liveStake" type="number" min="1" max="10000000" step="1" value="1000" inputmode="decimal" />
             </label>
+
             <label>
-              <span>Bookmaker filter</span>
+              <span>Bookmaker</span>
               <input id="liveBooks" type="text" placeholder="All bookmakers" autocomplete="off" />
             </label>
           </div>
 
           <div class="preset-row" aria-label="Quick filters">
-            <span class="preset-label">ROI presets</span>
+            <span class="preset-label">Quick ROI</span>
             <button class="chip-btn active" type="button" data-roi="0.1">0.1%</button>
             <button class="chip-btn" type="button" data-roi="0.5">0.5%</button>
             <button class="chip-btn" type="button" data-roi="1">1%</button>
             <button class="chip-btn" type="button" data-roi="2">2%</button>
             <span class="preset-divider"></span>
-            <span class="preset-label">Books</span>
+            <span class="preset-label">Quick Books</span>
             <button class="chip-btn" type="button" data-book="tab">TAB</button>
             <button class="chip-btn" type="button" data-book="sportsbet">Sportsbet</button>
             <button class="chip-btn" type="button" data-book="palmerbet">Palmerbet</button>
@@ -111,53 +119,36 @@
           </div>
 
           <div class="filter-footer">
-            <button id="scanLiveBtn" class="primary-btn scan-btn" type="button"><span class="btn-icon">⌁</span> Build Top 10 Board</button>
+            <button id="scanLiveBtn" class="primary-btn scan-btn" type="button"><span class="btn-icon">⌁</span> Scan Opportunities</button>
+
             <label class="toggle-row" for="autoRefresh">
               <input id="autoRefresh" type="checkbox" />
               <span class="toggle-ui"></span>
               <span class="toggle-copy"><strong>Auto refresh</strong><small>Every 60 seconds</small></span>
             </label>
-            <div class="scan-cost"><span>Scan scope</span><strong id="scanCostText">All Markets · 6 API credits</strong></div>
-            <div class="last-updated"><span>Last updated</span><strong id="lastUpdated">Not yet scanned</strong></div>
+
+            <div class="last-updated">
+              <span>Last updated</span>
+              <strong id="lastUpdated">Not yet scanned</strong>
+            </div>
           </div>
         </div>
 
         <div class="result-toolbar">
-          <div id="liveMessage" class="empty-state live-message">Ready to build the Top 10 board.</div>
-          <div class="sort-label">True arbs first · value comparisons fill remaining slots</div>
+          <div id="liveMessage" class="empty-state live-message">Press “Scan Opportunities” to load the latest market.</div>
+          <div class="legend-inline">
+            <span><i class="legend-dot arb"></i> TRUE ARB</span>
+            <span><i class="legend-dot value"></i> VALUE</span>
+          </div>
         </div>
+
         <div id="liveResults" class="live-results"></div>
       </section>
 
-      <section class="card" id="calculator">
-        <div class="section-head">
-          <div><div class="eyebrow">MANUAL TOOL</div><h2>Arbitrage Calculator</h2><p>Validate a specific market or manually model odds before execution.</p></div>
-          <div class="mode-switch" role="group" aria-label="Market type"><button id="twoWayBtn" class="mode-btn active" type="button">2-way</button><button id="threeWayBtn" class="mode-btn" type="button">3-way</button></div>
-        </div>
-        <div class="form-grid top-fields">
-          <label><span>Event</span><input id="eventName" type="text" placeholder="e.g. Arsenal vs Chelsea" /></label>
-          <label><span>Market</span><select id="marketName"><option>Match Winner</option><option>Moneyline</option><option>Draw No Bet</option><option>Over / Under</option><option>Both Teams to Score</option><option>Custom</option></select></label>
-          <label><span>Total Stake</span><div class="money-input"><span>SAR</span><input id="totalStake" type="number" min="1" step="1" value="1000" /></div></label>
-        </div>
-        <div id="outcomes" class="outcomes-grid"></div>
-        <div class="actions-row"><button id="calculateBtn" class="primary-btn" type="button">Calculate Arbitrage</button><button id="resetBtn" class="secondary-btn" type="button">Reset</button></div>
-      </section>
-
-      <section class="results-grid" id="results">
-        <div class="card result-card hero-result"><div class="section-head compact"><div><div class="eyebrow">CALCULATION RESULT</div><h2 id="arbStatus">Enter odds to calculate</h2></div><div id="roiBadge" class="roi-badge neutral">—</div></div><div class="stats-grid"><div class="stat"><span>Arbitrage index</span><strong id="arbIndex">—</strong></div><div class="stat"><span>Guaranteed payout</span><strong id="guaranteedPayout">—</strong></div><div class="stat"><span>Estimated profit</span><strong id="estimatedProfit">—</strong></div><div class="stat"><span>ROI</span><strong id="roiValue">—</strong></div></div></div>
-        <div class="card"><div class="section-head compact"><div><div class="eyebrow">STAKE PLAN</div><h2>Recommended split</h2></div></div><div id="stakePlan" class="stake-plan empty-state">Run a calculation to see the stake split.</div></div>
-      </section>
-
-      <section class="card" id="guide">
-        <div class="section-head"><div><div class="eyebrow">METHODOLOGY</div><h2>How the calculation works</h2><p>For decimal odds, an arbitrage exists when the sum of the inverse best prices is below 1.</p></div></div>
-        <div class="formula-box"><code>2-way: 1 / Odds A + 1 / Odds B &lt; 1</code><code>3-way: 1 / Home + 1 / Draw + 1 / Away &lt; 1</code></div>
-        <div class="warning-box"><strong>Execution risk</strong><p>Only rows marked TRUE ARB are mathematical arbitrage candidates. Other Top 10 rows are informational market comparisons and are not guaranteed to profit. Odds can move, stakes can be limited, and settlement rules can differ.</p></div>
-      </section>
-
-      <footer>Kaka Arb · Live market monitoring & manual arbitrage calculator</footer>
+      <footer>Kaka Arb · Live arbitrage scanner</footer>
     </main>
   </div>
-  <script src="app.js"></script>
+
   <script src="live.js"></script>
 </body>
 </html>
