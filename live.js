@@ -16,6 +16,7 @@ const liveEls = {
 };
 
 const DISPLAY_TARGET = 10;
+const FUTURE_BUFFER_MS = 2 * 60 * 1000;
 let refreshTimer = null;
 let latestEvents = [];
 let activeController = null;
@@ -58,6 +59,15 @@ function pointText(stake) {
   if (!Number.isFinite(point)) return '';
   if (['over','under'].includes(String(stake.name).toLowerCase())) return ` ${point}`;
   return ` ${point > 0 ? '+' : ''}${point}`;
+}
+
+function parseStartMs(value) {
+  if (!value) return NaN;
+  if (typeof value === 'number') return value > 1e12 ? value : value * 1000;
+  const raw = String(value).trim();
+  if (!raw) return NaN;
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw);
+  return Date.parse(hasZone ? raw : `${raw}Z`);
 }
 
 function scaleStakes(optimalStakes, totalStake) {
@@ -135,9 +145,8 @@ function bookmakerMatches(plan) {
 }
 
 function isFutureEvent(event) {
-  if (!event.commence_time) return false;
-  const start = new Date(event.commence_time).getTime();
-  return Number.isFinite(start) && start > Date.now();
+  const start = parseStartMs(event?.commence_time);
+  return Number.isFinite(start) && start > Date.now() + FUTURE_BUFFER_MS;
 }
 
 function buildBoard(events) {
@@ -151,13 +160,17 @@ function buildBoard(events) {
     .filter(item => item.plan)
     .filter(item => bookmakerMatches(item.plan))
     .filter(item => item.event.is_arb === true && item.plan.profit > 0 && item.plan.roi > 0)
-    .sort((a, b) => b.plan.roi - a.plan.roi);
+    .sort((a, b) => {
+      const timeDiff = parseStartMs(a.event.commence_time) - parseStartMs(b.event.commence_time);
+      if (timeDiff !== 0) return timeDiff;
+      return b.plan.roi - a.plan.roi;
+    });
 
   return { board: trueArbs.slice(0, DISPLAY_TARGET), trueArbs };
 }
 
 function updateMetrics(trueArbs, board, scanTime = new Date()) {
-  const best = trueArbs[0];
+  const best = [...trueArbs].sort((a, b) => b.plan.roi - a.plan.roi)[0];
   liveEls.metricCount.textContent = String(trueArbs.length);
   liveEls.metricBestRoi.textContent = best ? `+${best.plan.roi.toFixed(2)}%` : '—';
   liveEls.metricBestProfit.textContent = best ? money(best.plan.profit) : '—';
@@ -173,14 +186,21 @@ function renderLive(events, scanTime = latestScanTime || new Date()) {
 
   if (!board.length) {
     liveEls.message.textContent = 'No future positive arbitrage opportunities match your current filters.';
-    liveEls.results.innerHTML = `<div class="no-results"><div class="no-results-icon">◎</div><div><strong>No positive future arbs right now</strong><span>Try All Sports, All Markets, or clear the bookmaker filter.</span></div></div>`;
+    liveEls.results.innerHTML = `<div class="no-results"><div class="no-results-icon">◎</div><div><strong>No positive future arbs right now</strong><span>Only matches that have not started are shown. Try All Sports, All Markets, or clear the bookmaker filter.</span></div></div>`;
     return;
   }
 
   liveEls.message.textContent = `${trueArbs.length} future positive true arb${trueArbs.length === 1 ? '' : 's'} found · ${board.length} shown`;
 
   board.forEach(({ event, plan }, index) => {
-    const when = new Date(event.commence_time).toLocaleString('en-AU');
+    const startMs = parseStartMs(event.commence_time);
+    const when = new Date(startMs).toLocaleString('en-AU');
+    const minutesToStart = Math.max(0, Math.floor((startMs - Date.now()) / 60000));
+    const startsText = minutesToStart < 60
+      ? `Starts in ${minutesToStart} min`
+      : minutesToStart < 1440
+        ? `Starts in ${Math.floor(minutesToStart / 60)}h ${minutesToStart % 60}m`
+        : `Starts ${when}`;
     const sourceRoi = Number(event.arb_pct || 0);
     const sourceRoiText = Number.isFinite(sourceRoi) && sourceRoi > 0 ? sourceRoi.toFixed(2) : null;
     const market = marketLabel(event.market_type);
@@ -195,10 +215,11 @@ function renderLive(events, scanTime = latestScanTime || new Date()) {
             <div class="event-meta">
               <span class="sport-chip">${esc(String(event.sport_key || 'SPORT').toUpperCase())}</span>
               <span class="market-chip">${esc(market)}</span>
-              <span class="guarantee-chip">TRUE ARB</span>
-              <span>${esc(when)}</span>
+              <span class="guarantee-chip">FUTURE TRUE ARB</span>
+              <span>${esc(startsText)}</span>
             </div>
             <h3>${esc(event.home_team || 'Home')} <span>vs</span> ${esc(event.away_team || 'Away')}</h3>
+            <small class="event-start-time">Scheduled: ${esc(when)}</small>
           </div>
         </div>
         <div class="roi-stack">
@@ -209,8 +230,8 @@ function renderLive(events, scanTime = latestScanTime || new Date()) {
 
       <div class="live-summary">
         <div><span>Total Stake</span><strong>${money(totalStake)}</strong></div>
-        <div><span>Guaranteed Profit</span><strong class="profit-text">${money(plan.profit)}</strong></div>
-        <div><span>Guaranteed Return</span><strong>${money(plan.guaranteedReturn)}</strong></div>
+        <div><span>Quoted Profit</span><strong class="profit-text">${money(plan.profit)}</strong></div>
+        <div><span>Quoted Return</span><strong>${money(plan.guaranteedReturn)}</strong></div>
         <div><span>Market</span><strong>${esc(market)}</strong></div>
       </div>
 
@@ -254,7 +275,7 @@ async function scanLive() {
   liveEls.scanBtn.disabled = true;
   liveEls.scanBtn.innerHTML = '<span class="spinner"></span> Scanning…';
   liveEls.status.textContent = '● Scanning';
-  liveEls.message.textContent = 'Checking future positive arbitrage opportunities…';
+  liveEls.message.textContent = 'Checking upcoming positive arbitrage opportunities…';
   liveEls.results.innerHTML = '<div class="loading-skeleton"><div></div><div></div><div></div></div>';
 
   const params = new URLSearchParams();
@@ -264,7 +285,7 @@ async function scanLive() {
   params.set('min_profit_pct', '0');
 
   try {
-    const response = await fetch(`/api/arbitrage?${params.toString()}`, { cache: 'no-store', signal: activeController.signal });
+    const response = await fetch(`/api/arbitrage?${params.toString()}&t=${Date.now()}`, { cache: 'no-store', signal: activeController.signal });
     const contentType = response.headers.get('content-type') || '';
     const data = contentType.includes('application/json') ? await response.json() : { error: await response.text() };
     if (!response.ok) {
@@ -273,10 +294,10 @@ async function scanLive() {
     }
     if (serial !== requestSerial) return;
 
-    latestEvents = Array.isArray(data) ? data : [];
+    latestEvents = Array.isArray(data) ? data.filter(isFutureEvent) : [];
     latestScanTime = new Date();
     renderLive(latestEvents, latestScanTime);
-    liveEls.status.textContent = '● Live';
+    liveEls.status.textContent = '● Live · Future only';
   } catch (error) {
     if (error.name === 'AbortError') return;
     liveEls.message.textContent = error.message;
@@ -315,4 +336,6 @@ liveEls.stake.addEventListener('keydown', e => { if (e.key === 'Enter') scanLive
 liveEls.books.addEventListener('keydown', e => { if (e.key === 'Enter') renderCached(); });
 document.querySelectorAll('[data-book]').forEach(btn => btn.addEventListener('click', () => setBookPreset(btn.dataset.book)));
 
+// Even with auto-refresh off, remove any event as it approaches its start time.
+setInterval(renderCached, 30000);
 loadSportsCatalog();
