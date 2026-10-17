@@ -65,6 +65,7 @@ function normalizeLineArbs(events, requestedMode) {
         is_arb: opp.is_arb === true,
         is_middle: opp.is_middle === true,
         arb_pct: Number(opp.arb_pct || 0),
+        max_overlay_pct: Number(opp.max_overlay_pct || 0),
         selections,
         optimal_stakes: optimalStakes,
       });
@@ -111,7 +112,16 @@ export default async function handler(req, res) {
     }
 
     const groups = await Promise.all(requests);
-    const combined = groups.flat().filter(item => item && item.is_arb === true);
+    const combined = groups.flat().filter(Boolean);
+
+    // Return true arbitrage first, then the strongest non-arb/value comparisons.
+    // The frontend labels non-arb rows clearly as NOT GUARANTEED.
+    combined.sort((a, b) => {
+      if (Boolean(a.is_arb) !== Boolean(b.is_arb)) return a.is_arb ? -1 : 1;
+      const aScore = Number(a.arb_pct || a.max_overlay_pct || 0);
+      const bScore = Number(b.arb_pct || b.max_overlay_pct || 0);
+      return bScore - aScore;
+    });
 
     res.setHeader('Cache-Control', 's-maxage=20, stale-while-revalidate=40');
     return res.status(200).json(combined);
