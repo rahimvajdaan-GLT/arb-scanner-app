@@ -11,13 +11,30 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Allow Vercel deploy to settle
-        run: sleep 5
-      - name: Probe production v5 coverage
+      - name: Probe explicit Action Network book IDs
         run: |
-          echo '=== SOCCER ALL LEAGUES ==='
+          DATE=$(date -u +%Y%m%d)
+          for BOOK in 15 30 75 123 69 68 972 71 247 79; do
+            echo "=== BOOK $BOOK ==="
+            curl -sS -A 'Mozilla/5.0 Chrome/124 Safari/537.36' "https://api.actionnetwork.com/web/v2/scoreboard/nfl?date=$DATE&bookIds=$BOOK" -o "/tmp/b$BOOK.json"
+            python - "$BOOK" <<'PY'
+          import json,sys
+          b=sys.argv[1]
+          p=f'/tmp/b{b}.json'
+          try:
+              d=json.load(open(p))
+              games=d.get('games',[])
+              populated=0
+              keys=set()
+              for g in games:
+                  mk=g.get('markets') or {}
+                  if mk: populated+=1; keys.update(map(str,mk.keys()))
+              print({'games':len(games),'games_with_markets':populated,'market_keys':sorted(keys)[:20]})
+          except Exception as e: print({'error':str(e)})
+          PY
+          done
+      - name: Probe current production
+        run: |
+          echo '=== CURRENT V5 ==='
           curl -sS --fail-with-body 'https://arb-scanner-app.vercel.app/api/arbitrage?sport_key=soccer&market_mode=all&debug=1'; echo
-          echo '=== NFL ==='
-          curl -sS --fail-with-body 'https://arb-scanner-app.vercel.app/api/arbitrage?sport_key=nfl&market_mode=all&debug=1'; echo
-          echo '=== ALL SPORTS PROFITABLE ARBS ==='
           curl -sS --fail-with-body 'https://arb-scanner-app.vercel.app/api/arbitrage?market_mode=all'; echo
