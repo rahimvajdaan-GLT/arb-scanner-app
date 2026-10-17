@@ -89,6 +89,13 @@ function normalizeLineArbs(events, requestedMode) {
         commence_time: event.commence_time,
         market_type: marketType || 'lines',
         source_type: 'arb_lines',
+        status: opp.status ?? event.status,
+        state: opp.state ?? event.state,
+        is_live: opp.is_live ?? event.is_live,
+        in_play: opp.in_play ?? event.in_play,
+        is_inplay: opp.is_inplay ?? event.is_inplay,
+        started: opp.started ?? event.started,
+        completed: opp.completed ?? event.completed,
         is_arb: opp.is_arb === true,
         is_middle: opp.is_middle === true,
         arb_pct: Number(opp.arb_pct || 0),
@@ -130,15 +137,39 @@ function parseStartMs(value) {
   const raw = String(value).trim();
   if (!raw) return NaN;
 
-  // PuntersEdge normally returns ISO timestamps. If an offset is missing,
-  // interpret the timestamp as UTC instead of server-local time.
   const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw);
-  const normalized = hasZone ? raw : `${raw}Z`;
-  return Date.parse(normalized);
+  return Date.parse(hasZone ? raw : `${raw}Z`);
+}
+
+function isInPlayOrStarted(event) {
+  if (!event) return true;
+
+  const liveFlags = [
+    event.is_live,
+    event.live,
+    event.in_play,
+    event.inplay,
+    event.is_inplay,
+    event.started,
+    event.has_started,
+    event.completed,
+  ];
+  if (liveFlags.some(value => value === true || value === 1 || String(value).toLowerCase() === 'true')) return true;
+
+  const statusText = [
+    event.status,
+    event.state,
+    event.match_status,
+    event.event_status,
+    event.phase,
+    event.market_status,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return /(in[-_ ]?play|live|started|playing|ongoing|half[-_ ]?time|halftime|finished|completed|ended)/i.test(statusText);
 }
 
 function isFuturePositiveArb(event, minProfitPct = 0) {
-  if (!event || event.is_arb !== true) return false;
+  if (!event || event.is_arb !== true || isInPlayOrStarted(event)) return false;
 
   const profitPct = Number(event.arb_pct || event.arb_profit_pct || 0);
   if (!Number.isFinite(profitPct) || profitPct <= Math.max(0, minProfitPct)) return false;
@@ -146,9 +177,9 @@ function isFuturePositiveArb(event, minProfitPct = 0) {
   const startMs = parseStartMs(event.commence_time);
   if (!Number.isFinite(startMs)) return false;
 
-  // Keep only genuinely upcoming events. The 2-minute safety buffer prevents
-  // a game that is about to start from lingering on the board because of feed/cache delay.
-  return startMs > Date.now() + 2 * 60_000;
+  // Strict pre-match only: hide anything starting within 10 minutes.
+  // This protects against feed delays, clock differences and stale in-play prices.
+  return startMs > Date.now() + 10 * 60_000;
 }
 
 export default async function handler(req, res) {
@@ -199,7 +230,6 @@ export default async function handler(req, res) {
         return Number(b.arb_pct || 0) - Number(a.arb_pct || 0);
       });
 
-    // Do not cache arbitrage responses: once a match starts it must disappear immediately.
     res.setHeader('Cache-Control', 'no-store, max-age=0');
     return res.status(200).json(combined);
   } catch (error) {
