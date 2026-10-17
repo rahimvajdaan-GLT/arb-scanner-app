@@ -30,7 +30,7 @@
       </div>
       <div class="side-note">
         <strong>Execution note</strong>
-        <span>Always verify odds, limits and settlement rules before placing any wager.</span>
+        <span>Only rows marked TRUE ARB are mathematical arbitrage. Value rows are comparisons, not guaranteed winners.</span>
       </div>
     </aside>
 
@@ -38,16 +38,16 @@
       <header class="topbar">
         <div>
           <div class="eyebrow">REAL-TIME MARKET MONITOR</div>
-          <h1>Arbitrage opportunity dashboard</h1>
-          <p>Scan moneyline, spreads and totals across supported sportsbooks, then rank opportunities by effective ROI.</p>
+          <h1>Top 10 arbitrage & value board</h1>
+          <p>True arbitrage is ranked first. If fewer than 10 surebets exist, the board fills the remaining slots with the strongest market comparisons and labels them clearly as not guaranteed.</p>
         </div>
         <div class="status-pill" id="liveStatus">● Ready</div>
       </header>
 
       <section class="metric-strip" aria-label="Live scanner metrics">
-        <div class="metric-card"><span>Opportunities</span><strong id="metricCount">—</strong><small>matching current filters</small></div>
-        <div class="metric-card"><span>Best ROI</span><strong id="metricBestRoi">—</strong><small>effective rounded ROI</small></div>
-        <div class="metric-card"><span>Best Profit</span><strong id="metricBestProfit">—</strong><small>at your selected stake</small></div>
+        <div class="metric-card"><span>True Arbs</span><strong id="metricCount">—</strong><small>positive guaranteed setups</small></div>
+        <div class="metric-card"><span>Best Arb ROI</span><strong id="metricBestRoi">—</strong><small>effective rounded ROI</small></div>
+        <div class="metric-card"><span>Best Arb Profit</span><strong id="metricBestProfit">—</strong><small>at your selected stake</small></div>
         <div class="metric-card"><span>Last Scan</span><strong id="metricLastScan">—</strong><small>local time</small></div>
       </section>
 
@@ -56,7 +56,7 @@
           <div>
             <div class="eyebrow">LIVE ODDS</div>
             <h2>Opportunity Scanner</h2>
-            <p>All Markets combines match-winner arbitrage with spread and totals line arbitrage.</p>
+            <p>All Markets combines match-winner arbitrage with spread and totals comparisons.</p>
           </div>
           <div class="scan-health"><span class="pulse"></span><span>Live feed</span></div>
         </div>
@@ -83,7 +83,7 @@
               </select>
             </label>
             <label>
-              <span>Minimum ROI %</span>
+              <span>Minimum TRUE ARB ROI %</span>
               <input id="liveMinProfit" type="number" min="0" max="50" step="0.1" value="0.1" inputmode="decimal" />
             </label>
             <label>
@@ -111,7 +111,7 @@
           </div>
 
           <div class="filter-footer">
-            <button id="scanLiveBtn" class="primary-btn scan-btn" type="button"><span class="btn-icon">⌁</span> Scan Live Opportunities</button>
+            <button id="scanLiveBtn" class="primary-btn scan-btn" type="button"><span class="btn-icon">⌁</span> Build Top 10 Board</button>
             <label class="toggle-row" for="autoRefresh">
               <input id="autoRefresh" type="checkbox" />
               <span class="toggle-ui"></span>
@@ -123,8 +123,8 @@
         </div>
 
         <div class="result-toolbar">
-          <div id="liveMessage" class="empty-state live-message">Ready to scan moneyline, spreads and totals.</div>
-          <div class="sort-label">Sorted by highest effective ROI</div>
+          <div id="liveMessage" class="empty-state live-message">Ready to build the Top 10 board.</div>
+          <div class="sort-label">True arbs first · value comparisons fill remaining slots</div>
         </div>
         <div id="liveResults" class="live-results"></div>
       </section>
@@ -151,7 +151,7 @@
       <section class="card" id="guide">
         <div class="section-head"><div><div class="eyebrow">METHODOLOGY</div><h2>How the calculation works</h2><p>For decimal odds, an arbitrage exists when the sum of the inverse best prices is below 1.</p></div></div>
         <div class="formula-box"><code>2-way: 1 / Odds A + 1 / Odds B &lt; 1</code><code>3-way: 1 / Home + 1 / Draw + 1 / Away &lt; 1</code></div>
-        <div class="warning-box"><strong>Execution risk</strong><p>The scanner identifies mathematical opportunities, not guaranteed real-world outcomes. Odds can move, markets may suspend, stakes can be limited or rejected, and bookmaker settlement rules can differ.</p></div>
+        <div class="warning-box"><strong>Execution risk</strong><p>Only rows marked TRUE ARB are mathematical arbitrage candidates. Other Top 10 rows are informational market comparisons and are not guaranteed to profit. Odds can move, stakes can be limited, and settlement rules can differ.</p></div>
       </section>
 
       <footer>ArbScope · Live market monitoring & manual arbitrage calculator</footer>
