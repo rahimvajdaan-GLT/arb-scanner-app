@@ -1,0 +1,8 @@
+.live-controls{grid-template-columns:1.05fr 1.15fr .78fr .9fr 1.12fr}
+.scan-cost{display:grid;gap:3px;padding:0 4px}.scan-cost span{font-size:10px;color:#8898b0}.scan-cost strong{font-size:11px;color:#315d96}
+.market-chip,.middle-chip{display:inline-flex;align-items:center;padding:4px 7px;border-radius:999px;font-size:9px;font-weight:800;letter-spacing:.04em;border:1px solid #dce7f5;background:#f2f7ff;color:#4d6f9f}
+.middle-chip{background:#ecfbf5;border-color:#ccefe1;color:#0a815c}
+.event-meta{flex-wrap:wrap}
+@media(max-width:1250px){.live-controls{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:900px){.live-controls{grid-template-columns:repeat(2,minmax(0,1fr))}.scan-cost{padding:0}}
+@media(max-width:680px){.live-controls{grid-template-columns:1fr}.scan-cost{width:100%}}
