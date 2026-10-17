@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'api/arbitrage.js'
+      - '.github/workflows/probe-odds.yml'
 
 jobs:
   probe:
