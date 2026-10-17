@@ -17,6 +17,7 @@ const liveEls = {
   metricLastScan: document.getElementById('metricLastScan'),
 };
 
+const DISPLAY_TARGET = 10;
 let refreshTimer = null;
 let latestEvents = [];
 let activeController = null;
@@ -56,9 +57,7 @@ function marketLabel(type) {
 function pointText(stake) {
   const point = Number(stake.point);
   if (!Number.isFinite(point)) return '';
-  if (String(stake.name).toLowerCase() === 'over' || String(stake.name).toLowerCase() === 'under') {
-    return ` ${point}`;
-  }
+  if (String(stake.name).toLowerCase() === 'over' || String(stake.name).toLowerCase() === 'under') return ` ${point}`;
   return ` ${point > 0 ? '+' : ''}${point}`;
 }
 
@@ -79,9 +78,31 @@ function selectionForStake(stake, selections) {
   return exact || selections.find(x => String(x.name) === String(stake.name)) || {};
 }
 
+function deriveOptimalFromSelections(selections) {
+  const usable = selections
+    .map(sel => ({
+      name: sel.name,
+      point: sel.point,
+      price: Number(sel.best_price || sel.price || sel.odds || 0),
+      bookmaker: sel.best_bookmaker || sel.bookmaker || '',
+    }))
+    .filter(sel => sel.name && Number.isFinite(sel.price) && sel.price > 1);
+
+  if (usable.length < 2) return [];
+  const inverseSum = usable.reduce((sum, sel) => sum + (1 / sel.price), 0);
+  if (!Number.isFinite(inverseSum) || inverseSum <= 0) return [];
+
+  return usable.map(sel => ({
+    ...sel,
+    stake: ((1 / sel.price) / inverseSum) * 100,
+  }));
+}
+
 function calculateRoundedPlan(event, totalStake) {
-  const optimal = Array.isArray(event.optimal_stakes) ? event.optimal_stakes : [];
   const selections = Array.isArray(event.selections) ? event.selections : [];
+  let optimal = Array.isArray(event.optimal_stakes) ? event.optimal_stakes : [];
+  if (!optimal.length) optimal = deriveOptimalFromSelections(selections);
+
   const scaled = scaleStakes(optimal, totalStake);
   if (!scaled.length) return null;
 
@@ -119,57 +140,81 @@ function bookmakerMatches(plan) {
   return wanted.some(w => books.some(b => b.includes(w)));
 }
 
-function updateMetrics(plans, scanTime = new Date()) {
-  const best = plans[0];
-  liveEls.metricCount.textContent = String(plans.length);
-  liveEls.metricBestRoi.textContent = best ? `${best.plan.roi >= 0 ? '+' : ''}${best.plan.roi.toFixed(2)}%` : '—';
-  liveEls.metricBestProfit.textContent = best ? money(best.plan.profit) : '—';
-  liveEls.metricLastScan.textContent = scanTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  liveEls.lastUpdated.textContent = scanTime.toLocaleTimeString();
+function valueScore(item) {
+  const overlay = Number(item.event.max_overlay_pct || 0);
+  if (Number.isFinite(overlay) && overlay > 0) return 100 + overlay;
+  return item.plan.roi;
 }
 
-function buildPlans(events) {
+function buildBoard(events) {
   const totalStake = clampNumber(liveEls.stake.value, 1000, 1, 10000000);
   const minRoi = clampNumber(liveEls.minProfit.value, 0.1, 0, 50);
 
   liveEls.stake.value = String(totalStake);
   liveEls.minProfit.value = String(minRoi);
 
-  return events
-    .filter(e => e && e.is_arb === true)
+  const prepared = events
+    .filter(Boolean)
     .map(event => ({ event, plan: calculateRoundedPlan(event, totalStake) }))
-    .filter(item => item.plan && item.plan.roi >= minRoi)
-    .filter(item => bookmakerMatches(item.plan))
+    .filter(item => item.plan)
+    .filter(item => bookmakerMatches(item.plan));
+
+  const trueArbs = prepared
+    .filter(item => item.event.is_arb === true && item.plan.roi >= minRoi)
     .sort((a, b) => b.plan.roi - a.plan.roi);
+
+  const fallback = prepared
+    .filter(item => !(item.event.is_arb === true && item.plan.roi >= minRoi))
+    .sort((a, b) => valueScore(b) - valueScore(a));
+
+  const board = [...trueArbs];
+  for (const item of fallback) {
+    if (board.length >= DISPLAY_TARGET) break;
+    board.push(item);
+  }
+
+  return { board, trueArbs };
+}
+
+function updateMetrics(trueArbs, board, scanTime = new Date()) {
+  const bestGuaranteed = trueArbs[0];
+  liveEls.metricCount.textContent = String(trueArbs.length);
+  liveEls.metricBestRoi.textContent = bestGuaranteed ? `+${bestGuaranteed.plan.roi.toFixed(2)}%` : '—';
+  liveEls.metricBestProfit.textContent = bestGuaranteed ? money(bestGuaranteed.plan.profit) : '—';
+  liveEls.metricLastScan.textContent = scanTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  liveEls.lastUpdated.textContent = `${scanTime.toLocaleTimeString()} · ${board.length} shown`;
 }
 
 function renderLive(events, scanTime = new Date()) {
   const totalStake = clampNumber(liveEls.stake.value, 1000, 1, 10000000);
-  const plans = buildPlans(events);
+  const { board, trueArbs } = buildBoard(events);
 
   liveEls.results.innerHTML = '';
-  updateMetrics(plans, scanTime);
+  updateMetrics(trueArbs, board, scanTime);
 
-  if (!plans.length) {
-    liveEls.message.textContent = 'No opportunities match your current ROI and bookmaker filters.';
+  if (!board.length) {
+    liveEls.message.textContent = 'No usable market comparisons were returned for the current filters.';
     liveEls.results.innerHTML = `
       <div class="no-results">
         <div class="no-results-icon">◎</div>
-        <div><strong>No qualifying arbitrage right now</strong><span>Try 0.1% ROI, All Sports, All Markets, or clear the bookmaker filter.</span></div>
+        <div><strong>No qualifying markets right now</strong><span>Try All Sports, All Markets, or clear the bookmaker filter.</span></div>
       </div>`;
     return;
   }
 
-  liveEls.message.textContent = `${plans.length} live arbitrage opportunit${plans.length === 1 ? 'y' : 'ies'} found across the selected markets.`;
+  const valueCount = board.length - trueArbs.length;
+  liveEls.message.textContent = `${trueArbs.length} true arbitrage setup${trueArbs.length === 1 ? '' : 's'} + ${valueCount} best available market comparison${valueCount === 1 ? '' : 's'} shown.`;
 
-  plans.forEach(({ event, plan }, index) => {
+  board.forEach(({ event, plan }, index) => {
     const when = event.commence_time ? new Date(event.commence_time).toLocaleString() : 'Time unavailable';
     const sourceRoi = Number(event.arb_pct || 0);
     const sourceRoiText = Number.isFinite(sourceRoi) ? sourceRoi.toFixed(2) : '—';
     const market = marketLabel(event.market_type);
+    const guaranteed = event.is_arb === true && plan.roi > 0;
+    const overlay = Number(event.max_overlay_pct || 0);
 
     const card = document.createElement('article');
-    card.className = 'live-card';
+    card.className = `live-card ${guaranteed ? 'guaranteed-card' : 'value-card'}`;
     card.innerHTML = `
       <div class="live-card-head">
         <div class="event-title-wrap">
@@ -178,6 +223,7 @@ function renderLive(events, scanTime = new Date()) {
             <div class="event-meta">
               <span class="sport-chip">${esc(String(event.sport_key || 'SPORT').toUpperCase())}</span>
               <span class="market-chip">${esc(market)}</span>
+              ${guaranteed ? '<span class="guarantee-chip">TRUE ARB</span>' : '<span class="value-chip">VALUE / NOT GUARANTEED</span>'}
               ${event.is_middle ? '<span class="middle-chip">Middle</span>' : ''}
               <span>${esc(when)}</span>
             </div>
@@ -185,19 +231,21 @@ function renderLive(events, scanTime = new Date()) {
           </div>
         </div>
         <div class="roi-stack">
-          <div class="roi-badge good">+${plan.roi.toFixed(2)}%</div>
-          <small>feed ${sourceRoiText}%</small>
+          <div class="roi-badge ${guaranteed ? 'good' : 'neutral'}">${plan.roi >= 0 ? '+' : ''}${plan.roi.toFixed(2)}%</div>
+          <small>${guaranteed ? `feed ${sourceRoiText}%` : overlay > 0 ? `overlay ${overlay.toFixed(2)}%` : 'best comparison'}</small>
         </div>
       </div>
 
       <div class="live-summary">
         <div><span>Total stake</span><strong>${money(totalStake)}</strong></div>
-        <div><span>Guaranteed profit</span><strong class="profit-text">${money(plan.profit)}</strong></div>
-        <div><span>Guaranteed return</span><strong>${money(plan.guaranteedReturn)}</strong></div>
+        <div><span>${guaranteed ? 'Guaranteed profit' : 'Balanced result'}</span><strong class="${guaranteed ? 'profit-text' : ''}">${money(plan.profit)}</strong></div>
+        <div><span>${guaranteed ? 'Guaranteed return' : 'Worst-case return'}</span><strong>${money(plan.guaranteedReturn)}</strong></div>
         <div><span>Market</span><strong>${esc(market)}</strong></div>
       </div>
 
-      <div class="market-label">Stake plan</div>
+      ${guaranteed ? '' : '<div class="value-warning">This row is included to fill the Top 10 board. It is not a surebet and can lose money.</div>'}
+
+      <div class="market-label">${guaranteed ? 'Stake plan' : 'Balanced comparison'}</div>
       <div class="stake-plan live-stakes">
         ${plan.scaled.map(s => {
           const payout = s.scaledStake * s.price;
@@ -250,9 +298,9 @@ async function scanLive() {
   activeController = new AbortController();
 
   liveEls.scanBtn.disabled = true;
-  liveEls.scanBtn.innerHTML = '<span class="spinner"></span> Scanning all selected markets…';
+  liveEls.scanBtn.innerHTML = '<span class="spinner"></span> Building Top 10 board…';
   liveEls.status.textContent = '● Scanning live odds';
-  liveEls.message.textContent = 'Checking bookmaker prices and arbitrage markets…';
+  liveEls.message.textContent = 'Checking true arbitrage first, then strongest value comparisons…';
   liveEls.results.innerHTML = '<div class="loading-skeleton"><div></div><div></div><div></div></div>';
 
   const params = new URLSearchParams();
