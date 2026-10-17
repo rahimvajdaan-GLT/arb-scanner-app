@@ -1,53 +1,40 @@
-const ENGINE = 'open-multibook-v6';
+const ENGINE = 'action-network-v7';
 const FUTURE_BUFFER_MS = 10 * 60 * 1000;
-const ACTION_BASE = 'https://api.actionnetwork.com/web';
+const ACTION_BASE = 'https://api.actionnetwork.com/web/v2/scoreboard';
 
-// Explicit public sportsbook IDs. The default Action Network view only returns
-// a smaller subset; requesting these IDs exposes a wider comparison board.
-const BOOK_IDS = ['68','69','71','75','79','123','247','972'];
-const BOOK_QUERY = BOOK_IDS.join(',');
-const BOOK_FALLBACK = new Map([
-  ['68','DraftKings'],
-  ['69','FanDuel'],
-  ['71','BetRivers NJ'],
-  ['75','BetMGM'],
-  ['79','bet365'],
-  ['123','Caesars'],
-  ['247','Unibet'],
-  ['972','BetRivers NY'],
+const BOOKS = new Map([
+  [68, 'DraftKings'],
+  [69, 'FanDuel'],
+  [75, 'BetMGM'],
+  [123, 'Caesars'],
+  [71, 'BetRivers'],
+  [79, 'bet365'],
 ]);
+const BOOK_IDS = [...BOOKS.keys()];
+const REQUEST_BOOK_IDS = [...BOOK_IDS, 15]; // 15 = consensus, requested only as a fallback reference
 
 const SPORTS = {
-  nfl: { slug: 'nfl', days: 7 },
-  ncaaf: { slug: 'ncaaf', days: 7 },
-  nba: { slug: 'nba', days: 5 },
-  ncaab: { slug: 'ncaab', days: 5 },
-  nhl: { slug: 'nhl', days: 5 },
-  mlb: { slug: 'mlb', days: 4 },
-  soccer: { slug: 'soccer', days: 4 },
-  soccer_epl: { slug: 'epl', days: 5 },
-  soccer_mls: { slug: 'mls', days: 5 },
+  nfl: { slug:'nfl', weekly:true },
+  ncaaf: { slug:'ncaaf', weekly:true },
+  nba: { slug:'nba', days:7 },
+  ncaab: { slug:'ncaab', days:7 },
+  wnba: { slug:'wnba', days:7 },
+  nhl: { slug:'nhl', days:7 },
+  mlb: { slug:'mlb', days:7 },
 };
+const DEFAULT_SPORTS = ['nba','ncaab','nhl','mlb','nfl','ncaaf','wnba'];
 
-const DEFAULT_SPORTS = ['nfl','ncaaf','nba','ncaab','nhl','mlb','soccer'];
 const HEADERS = {
-  Accept: 'application/json',
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36',
+  'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+  'Accept':'application/json',
+  'Referer':'https://www.actionnetwork.com/',
 };
-
-let bookDirectoryCache = null;
-let bookDirectoryAt = 0;
 
 async function getJson(url) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 9000);
+  const timer = setTimeout(() => controller.abort(), 12000);
   try {
-    const response = await fetch(url, {
-      headers: HEADERS,
-      signal: controller.signal,
-      redirect: 'follow',
-      cache: 'no-store',
-    });
+    const response = await fetch(url, { headers:HEADERS, signal:controller.signal, redirect:'follow', cache:'no-store' });
     if (!response.ok) throw new Error(`HTTP ${response.status} ${new URL(url).hostname}`);
     return await response.json();
   } finally {
@@ -62,293 +49,204 @@ function parseMs(value) {
     const n = Number(raw);
     return n > 1e12 ? n : n * 1000;
   }
-  const parsed = Date.parse(raw);
-  return Number.isFinite(parsed) ? parsed : NaN;
-}
-
-function toIso(value) {
-  const t = parseMs(value);
-  return Number.isFinite(t) ? new Date(t).toISOString() : null;
+  const t = Date.parse(raw);
+  return Number.isFinite(t) ? t : NaN;
 }
 
 function toDecimal(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n === 0) return null;
-  // Action Network normally returns American odds. Keep decimal compatibility
-  // in case a market is already represented in decimal format.
   if (n > 1 && n < 20) return n;
   return n > 0 ? n / 100 + 1 : 100 / Math.abs(n) + 1;
 }
 
-function normalizeName(value) {
-  return String(value || '')
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\b(fc|cf|afc|sc|ac|club|the)\b/g, ' ')
-    .replace(/\bunited\b/g, 'utd')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ');
-}
-
-function sameTeam(a, b) {
-  const x = normalizeName(a);
-  const y = normalizeName(b);
-  if (!x || !y) return false;
-  if (x === y || x.replace(/\s/g, '') === y.replace(/\s/g, '')) return true;
-  if (x.length > 4 && y.length > 4 && (x.includes(y) || y.includes(x))) return true;
-  const A = new Set(x.split(' '));
-  const B = new Set(y.split(' '));
-  const common = [...A].filter(token => B.has(token)).length;
-  return common / Math.max(A.size, B.size, 1) >= 0.6;
-}
-
-function dateKey(offsetDays) {
+function ctDate(offsetDays = 0) {
   const d = new Date(Date.now() + offsetDays * 86400000);
-  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
+  const s = d.toLocaleDateString('en-US', { timeZone:'America/Chicago', year:'numeric', month:'2-digit', day:'2-digit' });
+  const [m, day, y] = s.split('/');
+  return `${y}${m}${day}`;
 }
 
-function marketAllowed(market, mode) {
-  if (mode === 'all') return ['h2h','spreads','totals'].includes(market);
-  if (mode === 'lines') return ['spreads','totals'].includes(market);
-  return market === mode;
-}
-
-function addOffer(target, market, role, rawOdds, book, point = null) {
-  const odds = toDecimal(rawOdds);
-  const numericPoint = point == null ? null : Number(point);
-  if (!role || !Number.isFinite(odds) || odds <= 1) return;
-  target.push({
-    market,
-    role,
-    odds,
-    book,
-    point: Number.isFinite(numericPoint) ? numericPoint : null,
-  });
-}
-
-async function loadBookDirectory() {
-  if (bookDirectoryCache && Date.now() - bookDirectoryAt < 15 * 60 * 1000) return bookDirectoryCache;
-  const map = new Map(BOOK_FALLBACK);
-  try {
-    const payload = await getJson(`${ACTION_BASE}/v1/books`);
-    const rows = Array.isArray(payload) ? payload : (payload?.books || []);
-    for (const row of rows) {
-      const id = String(row?.id ?? '');
-      const name = String(row?.display_name || row?.name || '').trim();
-      if (id && name) map.set(id, name);
-    }
-  } catch (_) {}
-  bookDirectoryCache = map;
-  bookDirectoryAt = Date.now();
-  return map;
-}
-
-function usableBook(bookId, name) {
-  const id = String(bookId);
-  const n = String(name || '').trim();
-  if (!n) return false;
-  // These two are synthetic Action Network reference lines, not sportsbooks.
-  if (id === '15' || id === '30') return false;
-  return !/consensus|^open$/i.test(n);
-}
-
-function entriesForSide(entries, side) {
-  return (Array.isArray(entries) ? entries : []).filter(entry =>
-    String(entry?.side || '').toLowerCase() === side &&
-    (entry?.period == null || entry?.period === 'event')
+function mainLine(list, side) {
+  const rows = (Array.isArray(list) ? list : []).filter(row =>
+    String(row?.side || '').toLowerCase() === side &&
+    !row?.is_alt_market &&
+    (row?.period == null || row?.period === 'event')
   );
+  return rows.find(row => !row?.is_live) || null;
 }
 
-function teamFromGame(game, side) {
+function teamName(game, side) {
   const id = String(side === 'home' ? game?.home_team_id : game?.away_team_id);
-  const team = (game?.teams || []).find(item => String(item?.id) === id) || {};
+  const team = (Array.isArray(game?.teams) ? game.teams : []).find(item => String(item?.id) === id) || {};
   return team.full_name || team.name || team.display_name || '';
 }
 
-async function actionNetworkSport(sportKey, config, mode) {
-  const directory = await loadBookDirectory();
-  const dates = Array.from({ length: config.days + 1 }, (_, i) => dateKey(i));
-  const responses = await Promise.allSettled(dates.map(date => {
-    const url = `${ACTION_BASE}/v2/scoreboard/${encodeURIComponent(config.slug)}?date=${date}&bookIds=${encodeURIComponent(BOOK_QUERY)}`;
-    return getJson(url);
-  }));
+function marketAllowed(key, mode) {
+  if (mode === 'all') return ['h2h','spreads','totals'].includes(key);
+  if (mode === 'lines') return ['spreads','totals'].includes(key);
+  return key === mode;
+}
 
-  const games = responses
-    .filter(result => result.status === 'fulfilled')
-    .flatMap(result => Array.isArray(result.value?.games) ? result.value.games : []);
+async function fetchBoard(config, date) {
+  const params = new URLSearchParams({ bookIds: REQUEST_BOOK_IDS.join(','), periods:'event' });
+  if (date) params.set('date', date);
+  const payload = await getJson(`${ACTION_BASE}/${encodeURIComponent(config.slug)}?${params.toString()}`);
+  return Array.isArray(payload?.games) ? payload.games : [];
+}
 
-  const output = [];
+async function fetchSport(sportKey, mode) {
+  const config = SPORTS[sportKey];
+  if (!config) return { events:[], requests:0, errors:['unsupported sport'] };
+
+  const dates = config.weekly ? [null] : Array.from({ length: config.days || 2 }, (_, i) => ctDate(i));
+  const settled = await Promise.allSettled(dates.map(date => fetchBoard(config, date)));
+  const requests = settled.length;
+  const errors = settled.filter(r => r.status === 'rejected').map(r => String(r.reason?.message || r.reason));
+  const raw = settled.filter(r => r.status === 'fulfilled').flatMap(r => r.value);
+
   const seen = new Set();
+  const events = [];
 
-  for (const game of games) {
-    const start = toIso(game?.start_time);
-    if (!start || parseMs(start) <= Date.now() + FUTURE_BUFFER_MS) continue;
+  for (const game of raw) {
+    if (!game?.id || seen.has(game.id)) continue;
+    seen.add(game.id);
 
-    const home = teamFromGame(game, 'home');
-    const away = teamFromGame(game, 'away');
+    const status = String(game?.status || '').toLowerCase();
+    if (['complete','closed','final','cancelled','postponed'].includes(status)) continue;
+
+    const startMs = parseMs(game?.start_time);
+    if (!Number.isFinite(startMs) || startMs <= Date.now() + FUTURE_BUFFER_MS) continue;
+
+    const home = teamName(game, 'home');
+    const away = teamName(game, 'away');
     if (!home || !away) continue;
 
-    for (const [bookId, wrapped] of Object.entries(game?.markets || {})) {
-      const book = directory.get(String(bookId)) || BOOK_FALLBACK.get(String(bookId)) || `Book ${bookId}`;
-      if (!usableBook(bookId, book)) continue;
+    const byBook = [];
+    for (const [bookId, bookName] of BOOKS.entries()) {
+      const ev = game?.markets?.[String(bookId)]?.event;
+      if (!ev) continue;
 
-      const unique = `${game?.id || `${home}-${away}-${start}`}|${bookId}`;
-      if (seen.has(unique)) continue;
-      seen.add(unique);
-
-      const event = wrapped?.event || wrapped || {};
       const offers = [];
-
       if (marketAllowed('h2h', mode)) {
-        for (const row of entriesForSide(event?.moneyline, 'home')) addOffer(offers, 'h2h', 'home', row?.odds, book);
-        for (const row of entriesForSide(event?.moneyline, 'away')) addOffer(offers, 'h2h', 'away', row?.odds, book);
-        for (const row of entriesForSide(event?.moneyline, 'draw')) addOffer(offers, 'h2h', 'draw', row?.odds, book);
+        const h = mainLine(ev.moneyline, 'home');
+        const a = mainLine(ev.moneyline, 'away');
+        const d = mainLine(ev.moneyline, 'draw');
+        if (h?.odds != null) offers.push({ market:'h2h', role:'home', odds:toDecimal(h.odds), point:null, book:bookName });
+        if (a?.odds != null) offers.push({ market:'h2h', role:'away', odds:toDecimal(a.odds), point:null, book:bookName });
+        if (d?.odds != null) offers.push({ market:'h2h', role:'draw', odds:toDecimal(d.odds), point:null, book:bookName });
       }
-
       if (marketAllowed('spreads', mode)) {
-        for (const row of entriesForSide(event?.spread, 'home')) addOffer(offers, 'spreads', 'home', row?.odds, book, row?.value);
-        for (const row of entriesForSide(event?.spread, 'away')) addOffer(offers, 'spreads', 'away', row?.odds, book, row?.value);
+        const h = mainLine(ev.spread, 'home');
+        const a = mainLine(ev.spread, 'away');
+        if (h?.value != null && h?.odds != null) offers.push({ market:'spreads', role:'home', odds:toDecimal(h.odds), point:Number(h.value), book:bookName });
+        if (a?.value != null && a?.odds != null) offers.push({ market:'spreads', role:'away', odds:toDecimal(a.odds), point:Number(a.value), book:bookName });
       }
-
       if (marketAllowed('totals', mode)) {
-        for (const row of entriesForSide(event?.total, 'over')) addOffer(offers, 'totals', 'over', row?.odds, book, row?.value);
-        for (const row of entriesForSide(event?.total, 'under')) addOffer(offers, 'totals', 'under', row?.odds, book, row?.value);
+        const o = mainLine(ev.total, 'over');
+        const u = mainLine(ev.total, 'under');
+        if (o?.value != null && o?.odds != null) offers.push({ market:'totals', role:'over', odds:toDecimal(o.odds), point:Number(o.value), book:bookName });
+        if (u?.value != null && u?.odds != null) offers.push({ market:'totals', role:'under', odds:toDecimal(u.odds), point:Number(u.value), book:bookName });
       }
-
-      if (offers.length >= 2) output.push({ sport:sportKey, home, away, time:start, book, offers });
+      const clean = offers.filter(x => Number.isFinite(x.odds) && x.odds > 1);
+      if (clean.length) byBook.push({ book:bookName, offers:clean });
     }
+
+    if (byBook.length) events.push({
+      sport:sportKey,
+      home,
+      away,
+      time:new Date(startMs).toISOString(),
+      books:byBook,
+    });
   }
 
-  return output;
+  return { events, requests, errors };
 }
 
-function findBucket(buckets, event) {
-  const eventTime = parseMs(event.time);
-  return buckets.find(bucket =>
-    bucket.sport === event.sport &&
-    Math.abs(parseMs(bucket.time) - eventTime) <= 45 * 60 * 1000 &&
-    (
-      (sameTeam(bucket.home, event.home) && sameTeam(bucket.away, event.away)) ||
-      (sameTeam(bucket.home, event.away) && sameTeam(bucket.away, event.home))
-    )
-  );
-}
+function arbForMarket(event, market) {
+  const allOffers = event.books.flatMap(b => b.offers).filter(o => o.market === market);
+  if (!allOffers.length) return [];
 
-function mergeEvents(events) {
-  const buckets = [];
-  for (const event of events) {
-    let bucket = findBucket(buckets, event);
-    if (!bucket) {
-      bucket = { sport:event.sport, home:event.home, away:event.away, time:event.time, offers:[], books:new Set() };
-      buckets.push(bucket);
-    }
-    bucket.books.add(event.book);
-    const reversed = sameTeam(event.home, bucket.away) && sameTeam(event.away, bucket.home);
-    for (const offer of event.offers) {
-      let role = offer.role;
-      let point = offer.point;
-      if (reversed && (role === 'home' || role === 'away')) {
-        role = role === 'home' ? 'away' : 'home';
-        if (offer.market === 'spreads' && Number.isFinite(point)) point = -point;
-      }
-      bucket.offers.push({ ...offer, role, point });
-    }
-  }
-  return buckets;
-}
-
-function marketLines(bucket, market) {
-  if (market === 'h2h') return [{ offers:bucket.offers.filter(offer => offer.market === 'h2h') }];
   const groups = new Map();
-  for (const offer of bucket.offers.filter(item => item.market === market)) {
-    if (!Number.isFinite(offer.point)) continue;
-    const line = market === 'spreads' ? Math.abs(offer.point) : offer.point;
-    const key = Number(line).toFixed(4);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(offer);
-  }
-  return [...groups.values()].map(offers => ({ offers }));
-}
-
-function makeArb(bucket, market, offers) {
-  const best = {};
-  for (const offer of offers) {
-    if (!best[offer.role] || offer.odds > best[offer.role].odds) best[offer.role] = offer;
-  }
-
-  const roles = market === 'totals'
-    ? ['over','under']
-    : market === 'spreads'
-      ? ['home','away']
-      : offers.some(offer => offer.role === 'draw') ? ['home','draw','away'] : ['home','away'];
-
-  if (roles.some(role => !best[role])) return null;
-
-  const selections = roles.map(role => {
-    const pick = best[role];
-    return {
-      name: role === 'home' ? bucket.home : role === 'away' ? bucket.away : role === 'draw' ? 'Draw' : role === 'over' ? 'Over' : 'Under',
-      point: pick.point,
-      best_price: Number(pick.odds),
-      best_bookmaker: pick.book,
-    };
-  });
-
-  if (new Set(selections.map(selection => selection.best_bookmaker)).size < 2) return null;
-
-  const inverseSum = selections.reduce((sum, selection) => sum + 1 / selection.best_price, 0);
-  if (!Number.isFinite(inverseSum) || inverseSum >= 1) return null;
-
-  const roi = (1 / inverseSum - 1) * 100;
-  return {
-    event_id: `${bucket.sport}-${normalizeName(bucket.home).replace(/\s/g,'')}-${normalizeName(bucket.away).replace(/\s/g,'')}-${market}-${Math.round(parseMs(bucket.time)/60000)}`,
-    sport_key: bucket.sport,
-    home_team: bucket.home,
-    away_team: bucket.away,
-    commence_time: bucket.time,
-    market_type: market,
-    source_type: ENGINE,
-    is_arb: true,
-    arb_pct: Number(roi.toFixed(3)),
-    selections,
-    optimal_stakes: selections.map(selection => ({
-      name: selection.name,
-      point: selection.point,
-      price: selection.best_price,
-      bookmaker: selection.best_bookmaker,
-      stake: ((1 / selection.best_price) / inverseSum) * 100,
-    })),
-  };
-}
-
-function arbsForBucket(bucket, mode) {
-  const markets = mode === 'all' ? ['h2h','spreads','totals'] : mode === 'lines' ? ['spreads','totals'] : [mode];
-  const output = [];
-  for (const market of markets) {
-    for (const line of marketLines(bucket, market)) {
-      const opportunity = makeArb(bucket, market, line.offers);
-      if (opportunity) output.push(opportunity);
+  if (market === 'h2h') {
+    groups.set('main', allOffers);
+  } else if (market === 'spreads') {
+    for (const o of allOffers) {
+      if (!Number.isFinite(o.point)) continue;
+      const key = Math.abs(o.point).toFixed(4);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(o);
+    }
+  } else if (market === 'totals') {
+    for (const o of allOffers) {
+      if (!Number.isFinite(o.point)) continue;
+      const key = Number(o.point).toFixed(4);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(o);
     }
   }
+
+  const output = [];
+  for (const offers of groups.values()) {
+    const best = {};
+    for (const o of offers) if (!best[o.role] || o.odds > best[o.role].odds) best[o.role] = o;
+
+    const roles = market === 'totals'
+      ? ['over','under']
+      : market === 'spreads'
+        ? ['home','away']
+        : offers.some(o => o.role === 'draw') ? ['home','draw','away'] : ['home','away'];
+
+    if (roles.some(role => !best[role])) continue;
+
+    const selections = roles.map(role => {
+      const p = best[role];
+      return {
+        name: role === 'home' ? event.home : role === 'away' ? event.away : role === 'draw' ? 'Draw' : role === 'over' ? 'Over' : 'Under',
+        point:p.point,
+        best_price:Number(p.odds),
+        best_bookmaker:p.book,
+      };
+    });
+
+    if (new Set(selections.map(x => x.best_bookmaker)).size < 2) continue;
+    const inverse = selections.reduce((sum, x) => sum + 1 / x.best_price, 0);
+    if (!Number.isFinite(inverse) || inverse >= 1) continue;
+
+    const roi = (1 / inverse - 1) * 100;
+    output.push({
+      event_id:`${event.sport}-${event.home}-${event.away}-${market}-${event.time}`,
+      sport_key:event.sport,
+      home_team:event.home,
+      away_team:event.away,
+      commence_time:event.time,
+      market_type:market,
+      source_type:ENGINE,
+      is_arb:true,
+      arb_pct:Number(roi.toFixed(3)),
+      selections,
+      optimal_stakes:selections.map(x => ({
+        name:x.name,
+        point:x.point,
+        price:x.best_price,
+        bookmaker:x.best_bookmaker,
+        stake:((1 / x.best_price) / inverse) * 100,
+      })),
+    });
+  }
+
   return output;
 }
 
-async function scanSport(key, mode, diagnostic = false) {
-  const config = SPORTS[key];
-  if (!config) return diagnostic ? { events:[], error:'Unsupported sport' } : [];
-  try {
-    const events = await actionNetworkSport(key, config, mode);
-    return diagnostic ? { events, error:null } : events;
-  } catch (error) {
-    return diagnostic ? { events:[], error:String(error?.message || error) } : [];
-  }
+function arbsForEvent(event, mode) {
+  const markets = mode === 'all' ? ['h2h','spreads','totals'] : mode === 'lines' ? ['spreads','totals'] : [mode];
+  return markets.flatMap(m => arbForMarket(event, m));
 }
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET');
+    res.setHeader('Allow','GET');
     return res.status(405).json({ error:'Method not allowed' });
   }
 
@@ -358,49 +256,48 @@ export default async function handler(req, res) {
   const debug = String(req.query.debug || '') === '1';
 
   if (sport && !SPORTS[sport]) return res.status(400).json({ error:`Unsupported sport_key: ${sport}` });
-
   const keys = sport ? [sport] : DEFAULT_SPORTS;
 
   try {
+    const scans = await Promise.all(keys.map(key => fetchSport(key, mode)));
+
     if (debug) {
-      const scans = await Promise.all(keys.map(key => scanSport(key, mode, true)));
-      const sports = keys.map((key, index) => {
-        const events = scans[index].events;
-        const merged = mergeEvents(events).filter(bucket => parseMs(bucket.time) > Date.now() + FUTURE_BUFFER_MS);
-        const arbs = merged.flatMap(bucket => arbsForBucket(bucket, mode));
+      const sports = keys.map((key, i) => {
+        const scan = scans[i];
+        const games = scan.events.length;
+        const crossBookGames = scan.events.filter(e => e.books.length >= 2).length;
+        const books = [...new Set(scan.events.flatMap(e => e.books.map(b => b.book)))].sort();
+        const arbs = scan.events.flatMap(e => arbsForEvent(e, mode));
         return {
-          sport_key: key,
-          provider: 'ActionNetwork',
-          provider_ok: !scans[index].error,
-          error: scans[index].error,
-          bookmaker_rows: events.length,
-          games: merged.length,
-          cross_book_games: merged.filter(bucket => bucket.books.size >= 2).length,
-          bookmakers: [...new Set(events.map(event => event.book))].sort(),
-          bookmaker_count: new Set(events.map(event => event.book)).size,
-          arbs: arbs.length,
+          sport_key:key,
+          requests:scan.requests,
+          errors:scan.errors,
+          games,
+          cross_book_games:crossBookGames,
+          bookmakers:books,
+          bookmaker_count:books.length,
+          arbs:arbs.length,
         };
       });
       res.setHeader('Cache-Control','no-store');
-      return res.status(200).json({ engine:ENGINE, requested_book_ids:BOOK_IDS, future_buffer_minutes:FUTURE_BUFFER_MS/60000, sports });
+      return res.status(200).json({ engine:ENGINE, book_ids:BOOK_IDS, future_buffer_minutes:FUTURE_BUFFER_MS/60000, sports });
     }
 
-    const groups = await Promise.all(keys.map(key => scanSport(key, mode, false)));
-    const rows = groups.flat();
-    const merged = mergeEvents(rows).filter(bucket => parseMs(bucket.time) > Date.now() + FUTURE_BUFFER_MS);
-    const arbs = merged
-      .flatMap(bucket => arbsForBucket(bucket, mode))
+    const events = scans.flatMap(s => s.events);
+    const arbs = events
+      .flatMap(e => arbsForEvent(e, mode))
       .sort((a,b) => Number(b.arb_pct)-Number(a.arb_pct) || parseMs(a.commence_time)-parseMs(b.commence_time))
       .slice(0,100);
 
-    const bookCount = new Set(rows.map(event => event.book)).size;
+    const books = new Set(events.flatMap(e => e.books.map(b => b.book)));
     res.setHeader('Cache-Control','no-store, max-age=0');
     res.setHeader('X-Odds-Engine',ENGINE);
-    res.setHeader('X-Bookmaker-Count',String(bookCount));
-    res.setHeader('X-Cross-Book-Games',String(merged.filter(bucket => bucket.books.size >= 2).length));
+    res.setHeader('X-Bookmaker-Count',String(books.size));
+    res.setHeader('X-Game-Count',String(events.length));
+    res.setHeader('X-Cross-Book-Games',String(events.filter(e => e.books.length >= 2).length));
     res.setHeader('X-Arb-Count',String(arbs.length));
     return res.status(200).json(arbs);
   } catch (error) {
-    return res.status(500).json({ error:'Open multi-book scan failed', detail:error?.message || String(error), engine:ENGINE });
+    return res.status(500).json({ error:'Action Network scan failed', detail:error?.message || String(error), engine:ENGINE });
   }
 }
