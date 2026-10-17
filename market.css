@@ -17,6 +17,14 @@
 .filter-panel{border-radius:0}
 .sidebar .nav{margin-top:6px}
 .sidebar .nav-item{pointer-events:none;cursor:default}
+.bet-help{margin:14px 0 10px;padding:12px 14px;border:1px solid #cdeee1;background:#f0fbf7;border-radius:12px;color:#235b49;font-size:12px;line-height:1.45}
+.bet-instruction-row{align-items:center;border:1px solid #dce7f5;background:#fff;border-radius:12px;padding:14px 16px;margin-bottom:10px}
+.bet-number{display:inline-block;margin-bottom:5px;padding:3px 7px;border-radius:999px;background:#172033;color:#fff;font-size:9px;font-weight:800;letter-spacing:.06em}
+.bet-action{font-size:14px;font-weight:800;color:#172033;margin-bottom:4px;text-transform:uppercase}
+.bet-instruction-row .book{font-size:12px;font-weight:700;color:#315d96}
+.bet-instruction-row .selection{font-size:11px;color:#71809a;margin-top:2px}
+.stake-label{display:block;font-size:9px;font-weight:800;letter-spacing:.06em;color:#8391a5;margin-bottom:3px}
+.bet-instruction-row .stake-right strong{font-size:16px;color:#087553}
 @media(max-width:1250px){.live-controls{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:900px){.live-controls{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:680px){.live-controls{grid-template-columns:1fr}.legend-inline{width:100%;justify-content:flex-start}.live-card{padding:15px}.event-meta{gap:6px}}
+@media(max-width:680px){.live-controls{grid-template-columns:1fr}.legend-inline{width:100%;justify-content:flex-start}.live-card{padding:15px}.event-meta{gap:6px}.bet-instruction-row{align-items:flex-start;gap:10px}.bet-instruction-row .stake-right{text-align:left}}
