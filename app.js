@@ -57,20 +57,10 @@ function renderOutcomes() {
         <span>${state.mode}-way market</span>
       </div>
       <div class="outcome-fields">
-        <label>
-          <span>Selection</span>
-          <input class="selection-input" data-index="${index}" value="${outcome.selection}" />
-        </label>
-        <label>
-          <span>Decimal Odds</span>
-          <input class="odds-input" data-index="${index}" type="number" min="1.01" step="0.01" value="${outcome.odds}" />
-        </label>
-        <label style="grid-column: 1 / -1;">
-          <span>Bookmaker</span>
-          <input class="bookmaker-input" data-index="${index}" value="${outcome.bookmaker}" />
-        </label>
-      </div>
-    `;
+        <label><span>Selection</span><input class="selection-input" data-index="${index}" value="${escapeHtml(outcome.selection)}" /></label>
+        <label><span>Decimal Odds</span><input class="odds-input" data-index="${index}" type="number" min="1.01" step="0.01" value="${outcome.odds}" /></label>
+        <label style="grid-column:1/-1"><span>Bookmaker</span><input class="bookmaker-input" data-index="${index}" value="${escapeHtml(outcome.bookmaker)}" /></label>
+      </div>`;
     els.outcomes.appendChild(card);
   });
 }
@@ -87,34 +77,43 @@ function readInputs() {
   });
 }
 
+function roundedStakePlan(totalStake, odds, inverseSum) {
+  const raw = odds.map(odd => (totalStake * (1 / odd)) / inverseSum);
+  let used = 0;
+  return raw.map((stake, index) => {
+    const rounded = index === raw.length - 1
+      ? Math.round((totalStake - used) * 100) / 100
+      : Math.round(stake * 100) / 100;
+    used += rounded;
+    return rounded;
+  });
+}
+
 function calculate() {
   readInputs();
   const totalStake = Number(els.totalStake.value);
   const odds = state.outcomes.map(o => o.odds);
 
   const invalid = !Number.isFinite(totalStake) || totalStake <= 0 || odds.some(o => !Number.isFinite(o) || o <= 1);
-  if (invalid) {
-    showInvalid();
-    return;
-  }
+  if (invalid) return showInvalid();
 
   const inverseSum = odds.reduce((sum, odd) => sum + (1 / odd), 0);
-  const payout = totalStake / inverseSum;
-  const profit = payout - totalStake;
+  const stakes = roundedStakePlan(totalStake, odds, inverseSum);
+  const payouts = stakes.map((stake, i) => stake * odds[i]);
+  const guaranteedPayout = Math.min(...payouts);
+  const profit = guaranteedPayout - totalStake;
   const roi = (profit / totalStake) * 100;
-  const isArb = inverseSum < 1;
-
-  const stakes = odds.map(odd => (totalStake * (1 / odd)) / inverseSum);
+  const isArb = inverseSum < 1 && profit > 0;
 
   els.arbIndex.textContent = inverseSum.toFixed(4);
-  els.guaranteedPayout.textContent = formatMoney(payout);
+  els.guaranteedPayout.textContent = formatMoney(guaranteedPayout);
   els.estimatedProfit.textContent = formatMoney(profit);
   els.roiValue.textContent = `${roi.toFixed(2)}%`;
-
   els.arbStatus.textContent = isArb ? 'Arbitrage opportunity found' : 'No arbitrage at these odds';
   els.roiBadge.textContent = `${roi >= 0 ? '+' : ''}${roi.toFixed(2)}%`;
   els.roiBadge.className = `roi-badge ${isArb ? 'good' : 'bad'}`;
 
+  els.stakePlan.className = 'stake-plan';
   els.stakePlan.innerHTML = '';
   stakes.forEach((stake, index) => {
     const row = document.createElement('div');
@@ -124,8 +123,7 @@ function calculate() {
         <div class="book">${escapeHtml(state.outcomes[index].bookmaker)}</div>
         <div class="selection">${escapeHtml(state.outcomes[index].selection)} @ ${state.outcomes[index].odds.toFixed(2)}</div>
       </div>
-      <div class="amount">${formatMoney(stake)}</div>
-    `;
+      <div class="stake-right"><strong>${formatMoney(stake)}</strong><small>Payout ${formatMoney(payouts[index])}</small></div>`;
     els.stakePlan.appendChild(row);
   });
 }
@@ -183,6 +181,10 @@ els.twoWayBtn.addEventListener('click', () => setMode(2));
 els.threeWayBtn.addEventListener('click', () => setMode(3));
 els.calculateBtn.addEventListener('click', calculate);
 els.resetBtn.addEventListener('click', resetAll);
+els.totalStake.addEventListener('keydown', e => { if (e.key === 'Enter') calculate(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.classList?.contains('odds-input')) calculate();
+});
 
 document.querySelectorAll('[data-scroll]').forEach(btn => {
   btn.addEventListener('click', () => {
