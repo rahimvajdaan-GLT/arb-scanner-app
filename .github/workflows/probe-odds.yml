@@ -11,19 +11,21 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Allow production deploy to settle
-        run: sleep 3
-      - name: Probe Action Network sports
+      - name: Probe Action Network soccer slugs
+        run: |
+          DATE=$(date -u +%Y%m%d)
+          for SLUG in soccer mls epl premier-league; do
+            echo "=== $SLUG ==="
+            curl -sS -A 'Mozilla/5.0 Chrome/124 Safari/537.36' -o "/tmp/$SLUG" -w 'HTTP=%{http_code} TYPE=%{content_type} SIZE=%{size_download}\n' "https://api.actionnetwork.com/web/v2/scoreboard/$SLUG?date=$DATE" || true
+            head -c 400 "/tmp/$SLUG" || true; echo
+          done
+      - name: Probe production coverage
         run: |
           echo '=== NFL ==='
           curl -sS --fail-with-body 'https://arb-scanner-app.vercel.app/api/arbitrage?sport_key=nfl&market_mode=all&debug=1'; echo
-          echo '=== NHL ==='
-          curl -sS --fail-with-body 'https://arb-scanner-app.vercel.app/api/arbitrage?sport_key=nhl&market_mode=all&debug=1'; echo
-          echo '=== NBA ==='
-          curl -sS --fail-with-body 'https://arb-scanner-app.vercel.app/api/arbitrage?sport_key=nba&market_mode=all&debug=1'; echo
-      - name: Probe profitable output
-        run: |
-          echo '=== ALL MARKETS ==='
+          echo '=== NCAAF ==='
+          curl -sS --fail-with-body 'https://arb-scanner-app.vercel.app/api/arbitrage?sport_key=ncaaf&market_mode=all&debug=1'; echo
+          echo '=== NCAAB ==='
+          curl -sS --fail-with-body 'https://arb-scanner-app.vercel.app/api/arbitrage?sport_key=ncaab&market_mode=all&debug=1'; echo
+          echo '=== ALL ==='
           curl -sS --fail-with-body 'https://arb-scanner-app.vercel.app/api/arbitrage?market_mode=all'; echo
-          echo '=== H2H ==='
-          curl -sS --fail-with-body 'https://arb-scanner-app.vercel.app/api/arbitrage?market_mode=h2h'; echo
