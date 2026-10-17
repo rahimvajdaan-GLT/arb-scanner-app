@@ -1,6 +1,21 @@
-const ENGINE = 'open-multibook-v5';
+const ENGINE = 'open-multibook-v6';
 const FUTURE_BUFFER_MS = 10 * 60 * 1000;
 const ACTION_BASE = 'https://api.actionnetwork.com/web';
+
+// Explicit public sportsbook IDs. The default Action Network view only returns
+// a smaller subset; requesting these IDs exposes a wider comparison board.
+const BOOK_IDS = ['68','69','71','75','79','123','247','972'];
+const BOOK_QUERY = BOOK_IDS.join(',');
+const BOOK_FALLBACK = new Map([
+  ['68','DraftKings'],
+  ['69','FanDuel'],
+  ['71','BetRivers NJ'],
+  ['75','BetMGM'],
+  ['79','bet365'],
+  ['123','Caesars'],
+  ['247','Unibet'],
+  ['972','BetRivers NY'],
+]);
 
 const SPORTS = {
   nfl: { slug: 'nfl', days: 7 },
@@ -14,16 +29,14 @@ const SPORTS = {
   soccer_mls: { slug: 'mls', days: 5 },
 };
 
-// Avoid duplicate EPL/MLS games in the default scan because the generic soccer
-// endpoint already contains those leagues.
 const DEFAULT_SPORTS = ['nfl','ncaaf','nba','ncaab','nhl','mlb','soccer'];
 const HEADERS = {
   Accept: 'application/json',
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36',
 };
 
-let booksCache = null;
-let booksCacheAt = 0;
+let bookDirectoryCache = null;
+let bookDirectoryAt = 0;
 
 async function getJson(url) {
   const controller = new AbortController();
@@ -58,20 +71,13 @@ function toIso(value) {
   return Number.isFinite(t) ? new Date(t).toISOString() : null;
 }
 
-function americanToDecimal(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n === 0) return null;
-  if (n > 0) return n / 100 + 1;
-  return 100 / Math.abs(n) + 1;
-}
-
 function toDecimal(value) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return null;
-  // Action Network currently returns American prices. This decimal check also
-  // keeps the adapter tolerant if a future response already contains decimal odds.
+  if (!Number.isFinite(n) || n === 0) return null;
+  // Action Network normally returns American odds. Keep decimal compatibility
+  // in case a market is already represented in decimal format.
   if (n > 1 && n < 20) return n;
-  return americanToDecimal(n);
+  return n > 0 ? n / 100 + 1 : 100 / Math.abs(n) + 1;
 }
 
 function normalizeName(value) {
@@ -104,8 +110,8 @@ function dateKey(offsetDays) {
 }
 
 function marketAllowed(market, mode) {
-  if (mode === 'all') return ['h2h', 'spreads', 'totals'].includes(market);
-  if (mode === 'lines') return ['spreads', 'totals'].includes(market);
+  if (mode === 'all') return ['h2h','spreads','totals'].includes(market);
+  if (mode === 'lines') return ['spreads','totals'].includes(market);
   return market === mode;
 }
 
@@ -122,42 +128,30 @@ function addOffer(target, market, role, rawOdds, book, point = null) {
   });
 }
 
-async function loadBooks() {
-  if (booksCache && Date.now() - booksCacheAt < 15 * 60 * 1000) return booksCache;
-
-  const fallback = new Map([
-    ['68', 'DraftKings'],
-    ['69', 'FanDuel'],
-    ['71', 'BetRivers'],
-    ['75', 'BetMGM'],
-    ['49', 'Caesars'],
-  ]);
-
+async function loadBookDirectory() {
+  if (bookDirectoryCache && Date.now() - bookDirectoryAt < 15 * 60 * 1000) return bookDirectoryCache;
+  const map = new Map(BOOK_FALLBACK);
   try {
     const payload = await getJson(`${ACTION_BASE}/v1/books`);
-    const map = new Map();
-    for (const book of payload?.books || []) {
-      const id = String(book?.id ?? '');
-      const name = String(book?.display_name || book?.name || '').trim();
+    const rows = Array.isArray(payload) ? payload : (payload?.books || []);
+    for (const row of rows) {
+      const id = String(row?.id ?? '');
+      const name = String(row?.display_name || row?.name || '').trim();
       if (id && name) map.set(id, name);
     }
-    booksCache = map.size ? map : fallback;
-  } catch (_) {
-    booksCache = fallback;
-  }
-
-  booksCacheAt = Date.now();
-  return booksCache;
+  } catch (_) {}
+  bookDirectoryCache = map;
+  bookDirectoryAt = Date.now();
+  return map;
 }
 
-function isRealBook(bookId, bookName) {
+function usableBook(bookId, name) {
   const id = String(bookId);
-  const name = String(bookName || '').toLowerCase();
-  // Action Network uses 15 for Consensus and 30 for Open; neither represents
-  // a place where the user can actually place a bet.
+  const n = String(name || '').trim();
+  if (!n) return false;
+  // These two are synthetic Action Network reference lines, not sportsbooks.
   if (id === '15' || id === '30') return false;
-  if (!bookName || /consensus|\bopen\b/.test(name)) return false;
-  return true;
+  return !/consensus|^open$/i.test(n);
 }
 
 function entriesForSide(entries, side) {
@@ -167,40 +161,44 @@ function entriesForSide(entries, side) {
   );
 }
 
+function teamFromGame(game, side) {
+  const id = String(side === 'home' ? game?.home_team_id : game?.away_team_id);
+  const team = (game?.teams || []).find(item => String(item?.id) === id) || {};
+  return team.full_name || team.name || team.display_name || '';
+}
+
 async function actionNetworkSport(sportKey, config, mode) {
-  const books = await loadBooks();
+  const directory = await loadBookDirectory();
   const dates = Array.from({ length: config.days + 1 }, (_, i) => dateKey(i));
-  const responses = await Promise.allSettled(
-    dates.map(date => getJson(`${ACTION_BASE}/v2/scoreboard/${encodeURIComponent(config.slug)}?date=${date}`))
-  );
+  const responses = await Promise.allSettled(dates.map(date => {
+    const url = `${ACTION_BASE}/v2/scoreboard/${encodeURIComponent(config.slug)}?date=${date}&bookIds=${encodeURIComponent(BOOK_QUERY)}`;
+    return getJson(url);
+  }));
 
   const games = responses
     .filter(result => result.status === 'fulfilled')
     .flatMap(result => Array.isArray(result.value?.games) ? result.value.games : []);
 
   const output = [];
-  const seenBookGames = new Set();
+  const seen = new Set();
 
   for (const game of games) {
     const start = toIso(game?.start_time);
     if (!start || parseMs(start) <= Date.now() + FUTURE_BUFFER_MS) continue;
 
-    const teams = new Map((game?.teams || []).map(team => [String(team?.id), team]));
-    const homeObj = teams.get(String(game?.home_team_id)) || {};
-    const awayObj = teams.get(String(game?.away_team_id)) || {};
-    const home = homeObj.full_name || homeObj.name || homeObj.display_name;
-    const away = awayObj.full_name || awayObj.name || awayObj.display_name;
+    const home = teamFromGame(game, 'home');
+    const away = teamFromGame(game, 'away');
     if (!home || !away) continue;
 
-    for (const [bookId, wrappedMarket] of Object.entries(game?.markets || {})) {
-      const book = books.get(String(bookId));
-      if (!isRealBook(bookId, book)) continue;
+    for (const [bookId, wrapped] of Object.entries(game?.markets || {})) {
+      const book = directory.get(String(bookId)) || BOOK_FALLBACK.get(String(bookId)) || `Book ${bookId}`;
+      if (!usableBook(bookId, book)) continue;
 
       const unique = `${game?.id || `${home}-${away}-${start}`}|${bookId}`;
-      if (seenBookGames.has(unique)) continue;
-      seenBookGames.add(unique);
+      if (seen.has(unique)) continue;
+      seen.add(unique);
 
-      const event = wrappedMarket?.event || wrappedMarket || {};
+      const event = wrapped?.event || wrapped || {};
       const offers = [];
 
       if (marketAllowed('h2h', mode)) {
@@ -219,9 +217,7 @@ async function actionNetworkSport(sportKey, config, mode) {
         for (const row of entriesForSide(event?.total, 'under')) addOffer(offers, 'totals', 'under', row?.odds, book, row?.value);
       }
 
-      if (offers.length >= 2) {
-        output.push({ sport: sportKey, home, away, time: start, book, offers });
-      }
+      if (offers.length >= 2) output.push({ sport:sportKey, home, away, time:start, book, offers });
     }
   }
 
@@ -245,20 +241,11 @@ function mergeEvents(events) {
   for (const event of events) {
     let bucket = findBucket(buckets, event);
     if (!bucket) {
-      bucket = {
-        sport: event.sport,
-        home: event.home,
-        away: event.away,
-        time: event.time,
-        offers: [],
-        books: new Set(),
-      };
+      bucket = { sport:event.sport, home:event.home, away:event.away, time:event.time, offers:[], books:new Set() };
       buckets.push(bucket);
     }
-
     bucket.books.add(event.book);
     const reversed = sameTeam(event.home, bucket.away) && sameTeam(event.away, bucket.home);
-
     for (const offer of event.offers) {
       let role = offer.role;
       let point = offer.point;
@@ -273,10 +260,7 @@ function mergeEvents(events) {
 }
 
 function marketLines(bucket, market) {
-  if (market === 'h2h') {
-    return [{ offers: bucket.offers.filter(offer => offer.market === 'h2h') }];
-  }
-
+  if (market === 'h2h') return [{ offers:bucket.offers.filter(offer => offer.market === 'h2h') }];
   const groups = new Map();
   for (const offer of bucket.offers.filter(item => item.market === market)) {
     if (!Number.isFinite(offer.point)) continue;
@@ -294,10 +278,11 @@ function makeArb(bucket, market, offers) {
     if (!best[offer.role] || offer.odds > best[offer.role].odds) best[offer.role] = offer;
   }
 
-  let roles;
-  if (market === 'totals') roles = ['over', 'under'];
-  else if (market === 'spreads') roles = ['home', 'away'];
-  else roles = offers.some(offer => offer.role === 'draw') ? ['home', 'draw', 'away'] : ['home', 'away'];
+  const roles = market === 'totals'
+    ? ['over','under']
+    : market === 'spreads'
+      ? ['home','away']
+      : offers.some(offer => offer.role === 'draw') ? ['home','draw','away'] : ['home','away'];
 
   if (roles.some(role => !best[role])) return null;
 
@@ -318,7 +303,7 @@ function makeArb(bucket, market, offers) {
 
   const roi = (1 / inverseSum - 1) * 100;
   return {
-    event_id: `${bucket.sport}-${normalizeName(bucket.home).replace(/\s/g, '')}-${normalizeName(bucket.away).replace(/\s/g, '')}-${market}-${Math.round(parseMs(bucket.time) / 60000)}`,
+    event_id: `${bucket.sport}-${normalizeName(bucket.home).replace(/\s/g,'')}-${normalizeName(bucket.away).replace(/\s/g,'')}-${market}-${Math.round(parseMs(bucket.time)/60000)}`,
     sport_key: bucket.sport,
     home_team: bucket.home,
     away_team: bucket.away,
@@ -339,7 +324,7 @@ function makeArb(bucket, market, offers) {
 }
 
 function arbsForBucket(bucket, mode) {
-  const markets = mode === 'all' ? ['h2h', 'spreads', 'totals'] : mode === 'lines' ? ['spreads', 'totals'] : [mode];
+  const markets = mode === 'all' ? ['h2h','spreads','totals'] : mode === 'lines' ? ['spreads','totals'] : [mode];
   const output = [];
   for (const market of markets) {
     for (const line of marketLines(bucket, market)) {
@@ -352,34 +337,34 @@ function arbsForBucket(bucket, mode) {
 
 async function scanSport(key, mode, diagnostic = false) {
   const config = SPORTS[key];
-  if (!config) return diagnostic ? { events: [], error: 'Unsupported sport' } : [];
+  if (!config) return diagnostic ? { events:[], error:'Unsupported sport' } : [];
   try {
     const events = await actionNetworkSport(key, config, mode);
-    return diagnostic ? { events, error: null } : events;
+    return diagnostic ? { events, error:null } : events;
   } catch (error) {
-    return diagnostic ? { events: [], error: String(error?.message || error) } : [];
+    return diagnostic ? { events:[], error:String(error?.message || error) } : [];
   }
 }
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ error:'Method not allowed' });
   }
 
   const sport = typeof req.query.sport_key === 'string' ? req.query.sport_key.trim() : '';
   const rawMode = typeof req.query.market_mode === 'string' ? req.query.market_mode.trim().toLowerCase() : 'all';
-  const mode = ['all', 'h2h', 'lines', 'spreads', 'totals'].includes(rawMode) ? rawMode : 'all';
+  const mode = ['all','h2h','lines','spreads','totals'].includes(rawMode) ? rawMode : 'all';
   const debug = String(req.query.debug || '') === '1';
 
-  if (sport && !SPORTS[sport]) return res.status(400).json({ error: `Unsupported sport_key: ${sport}` });
+  if (sport && !SPORTS[sport]) return res.status(400).json({ error:`Unsupported sport_key: ${sport}` });
 
   const keys = sport ? [sport] : DEFAULT_SPORTS;
 
   try {
     if (debug) {
       const scans = await Promise.all(keys.map(key => scanSport(key, mode, true)));
-      const details = keys.map((key, index) => {
+      const sports = keys.map((key, index) => {
         const events = scans[index].events;
         const merged = mergeEvents(events).filter(bucket => parseMs(bucket.time) > Date.now() + FUTURE_BUFFER_MS);
         const arbs = merged.flatMap(bucket => arbsForBucket(bucket, mode));
@@ -392,32 +377,30 @@ export default async function handler(req, res) {
           games: merged.length,
           cross_book_games: merged.filter(bucket => bucket.books.size >= 2).length,
           bookmakers: [...new Set(events.map(event => event.book))].sort(),
+          bookmaker_count: new Set(events.map(event => event.book)).size,
           arbs: arbs.length,
         };
       });
-      res.setHeader('Cache-Control', 'no-store');
-      return res.status(200).json({ engine: ENGINE, future_buffer_minutes: FUTURE_BUFFER_MS / 60000, sports: details });
+      res.setHeader('Cache-Control','no-store');
+      return res.status(200).json({ engine:ENGINE, requested_book_ids:BOOK_IDS, future_buffer_minutes:FUTURE_BUFFER_MS/60000, sports });
     }
 
     const groups = await Promise.all(keys.map(key => scanSport(key, mode, false)));
-    const merged = mergeEvents(groups.flat()).filter(bucket => parseMs(bucket.time) > Date.now() + FUTURE_BUFFER_MS);
+    const rows = groups.flat();
+    const merged = mergeEvents(rows).filter(bucket => parseMs(bucket.time) > Date.now() + FUTURE_BUFFER_MS);
     const arbs = merged
       .flatMap(bucket => arbsForBucket(bucket, mode))
-      .sort((a, b) => Number(b.arb_pct) - Number(a.arb_pct) || parseMs(a.commence_time) - parseMs(b.commence_time))
-      .slice(0, 100);
+      .sort((a,b) => Number(b.arb_pct)-Number(a.arb_pct) || parseMs(a.commence_time)-parseMs(b.commence_time))
+      .slice(0,100);
 
-    const bookCount = new Set(groups.flat().map(event => event.book)).size;
-    res.setHeader('Cache-Control', 'no-store, max-age=0');
-    res.setHeader('X-Odds-Engine', ENGINE);
-    res.setHeader('X-Bookmaker-Count', String(bookCount));
-    res.setHeader('X-Cross-Book-Games', String(merged.filter(bucket => bucket.books.size >= 2).length));
-    res.setHeader('X-Arb-Count', String(arbs.length));
+    const bookCount = new Set(rows.map(event => event.book)).size;
+    res.setHeader('Cache-Control','no-store, max-age=0');
+    res.setHeader('X-Odds-Engine',ENGINE);
+    res.setHeader('X-Bookmaker-Count',String(bookCount));
+    res.setHeader('X-Cross-Book-Games',String(merged.filter(bucket => bucket.books.size >= 2).length));
+    res.setHeader('X-Arb-Count',String(arbs.length));
     return res.status(200).json(arbs);
   } catch (error) {
-    return res.status(500).json({
-      error: 'Open multi-book scan failed',
-      detail: error?.message || String(error),
-      engine: ENGINE,
-    });
+    return res.status(500).json({ error:'Open multi-book scan failed', detail:error?.message || String(error), engine:ENGINE });
   }
 }
