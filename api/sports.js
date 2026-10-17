@@ -1,38 +1,30 @@
+const SPORTS = [
+  { key: 'nfl', title: 'NFL', group: 'American Football', active: true },
+  { key: 'ncaaf', title: 'NCAAF', group: 'American Football', active: true },
+  { key: 'nba', title: 'NBA', group: 'Basketball', active: true },
+  { key: 'ncaab', title: 'NCAAB', group: 'Basketball', active: true },
+  { key: 'mlb', title: 'MLB', group: 'Baseball', active: true },
+  { key: 'nhl', title: 'NHL', group: 'Ice Hockey', active: true },
+  { key: 'ufc', title: 'UFC / MMA', group: 'Combat Sports', active: true },
+  { key: 'boxing', title: 'Boxing', group: 'Combat Sports', active: true },
+  { key: 'soccer_epl', title: 'English Premier League', group: 'Soccer', active: true },
+  { key: 'soccer_laliga', title: 'La Liga', group: 'Soccer', active: true },
+  { key: 'soccer_bundesliga', title: 'Bundesliga', group: 'Soccer', active: true },
+  { key: 'soccer_seriea', title: 'Serie A', group: 'Soccer', active: true },
+  { key: 'soccer_ligue1', title: 'Ligue 1', group: 'Soccer', active: true },
+  { key: 'soccer_mls', title: 'MLS', group: 'Soccer', active: true },
+  { key: 'soccer_uefa_champs_league', title: 'UEFA Champions League', group: 'Soccer', active: true },
+  { key: 'soccer_uefa_europa_league', title: 'UEFA Europa League', group: 'Soccer', active: true },
+  { key: 'tennis_atp', title: 'ATP Tennis', group: 'Tennis', active: true },
+  { key: 'tennis_wta', title: 'WTA Tennis', group: 'Tennis', active: true },
+];
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
     return res.status(405).json({ error: 'Method not allowed' });
   }
-
-  const apiKey = process.env.PUNTERSEDGE_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: 'PUNTERSEDGE_API_KEY is not configured on the server.' });
-  }
-
-  try {
-    const upstream = await fetch('https://api.puntersedge.online/v1/sports', {
-      headers: { 'X-API-Key': apiKey },
-    });
-
-    const contentType = upstream.headers.get('content-type') || '';
-    const payload = contentType.includes('application/json')
-      ? await upstream.json()
-      : { detail: await upstream.text() };
-
-    if (!upstream.ok) {
-      return res.status(upstream.status).json({
-        error: payload?.title || payload?.error || 'PuntersEdge sports request failed',
-        detail: payload?.detail || payload,
-      });
-    }
-
-    const sports = Array.isArray(payload)
-      ? payload.filter(item => item && item.active !== false)
-      : [];
-
-    res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400');
-    return res.status(200).json(sports);
-  } catch (error) {
-    return res.status(500).json({ error: 'Unable to load sports catalogue', detail: error.message });
-  }
+  res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400');
+  res.setHeader('X-Odds-Engine', 'open-books-v1');
+  return res.status(200).json(SPORTS);
 }
