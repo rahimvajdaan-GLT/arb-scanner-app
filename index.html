@@ -17,18 +17,15 @@
         <div class="brand-mark">A</div>
         <div><div class="brand">ArbScope</div><div class="brand-sub">Opportunity Intelligence</div></div>
       </div>
-
       <nav class="nav">
         <button class="nav-item active" data-scroll="liveScanner"><span>◎</span> Live Scanner</button>
         <button class="nav-item" data-scroll="calculator"><span>∑</span> Calculator</button>
         <button class="nav-item" data-scroll="guide"><span>?</span> Methodology</button>
       </nav>
-
       <div class="sidebar-status">
         <div class="status-dot"></div>
         <div><strong>Feed connected</strong><span>Secure server-side API</span></div>
       </div>
-
       <div class="side-note">
         <strong>Execution note</strong>
         <span>Always verify odds, limits and settlement rules before placing any wager.</span>
@@ -57,7 +54,7 @@
           <div>
             <div class="eyebrow">LIVE ODDS</div>
             <h2>Opportunity Scanner</h2>
-            <p>Use All Sports to surface the strongest available opportunities across the feed.</p>
+            <p>Scan current prices, then refine results instantly without using another API request.</p>
           </div>
           <div class="scan-health"><span class="pulse"></span><span>Live feed</span></div>
         </div>
@@ -76,16 +73,30 @@
             </label>
             <label>
               <span>Minimum ROI %</span>
-              <input id="liveMinProfit" type="number" min="0" step="0.1" value="0.5" />
+              <input id="liveMinProfit" type="number" min="0" max="50" step="0.1" value="0.5" inputmode="decimal" />
             </label>
             <label>
               <span>Total stake (SAR)</span>
-              <input id="liveStake" type="number" min="1" step="1" value="1000" />
+              <input id="liveStake" type="number" min="1" max="10000000" step="1" value="1000" inputmode="decimal" />
             </label>
             <label>
               <span>Bookmaker filter</span>
-              <input id="liveBooks" type="text" placeholder="All bookmakers" />
+              <input id="liveBooks" type="text" placeholder="All bookmakers" autocomplete="off" />
             </label>
+          </div>
+
+          <div class="preset-row" aria-label="Quick filters">
+            <span class="preset-label">ROI presets</span>
+            <button class="chip-btn" type="button" data-roi="0.1">0.1%</button>
+            <button class="chip-btn active" type="button" data-roi="0.5">0.5%</button>
+            <button class="chip-btn" type="button" data-roi="1">1%</button>
+            <button class="chip-btn" type="button" data-roi="2">2%</button>
+            <span class="preset-divider"></span>
+            <span class="preset-label">Books</span>
+            <button class="chip-btn" type="button" data-book="tab">TAB</button>
+            <button class="chip-btn" type="button" data-book="sportsbet">Sportsbet</button>
+            <button class="chip-btn" type="button" data-book="palmerbet">Palmerbet</button>
+            <button class="chip-btn subtle" type="button" data-book="">Clear</button>
           </div>
 
           <div class="filter-footer">
