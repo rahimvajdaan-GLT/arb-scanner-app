@@ -179,7 +179,6 @@ function isFuturePositiveArb(event, minProfitPct = 0) {
   const startMs = parseStartMs(event.commence_time);
   if (!Number.isFinite(startMs)) return false;
 
-  // Strict pre-match only. Anything inside 10 minutes of scheduled start is hidden.
   return startMs > Date.now() + 10 * 60_000;
 }
 
@@ -187,20 +186,35 @@ function normalizeName(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+function teamTokens(value) {
+  const stop = new Set(['fc', 'club', 'the', 'united', 'city', 'team']);
+  return normalizeName(value).split(' ').filter(token => token && !stop.has(token));
+}
+
+function similarTeam(a, b) {
+  const na = normalizeName(a);
+  const nb = normalizeName(b);
+  if (!na || !nb) return false;
+  if (na === nb || na.includes(nb) || nb.includes(na)) return true;
+
+  const ta = teamTokens(a);
+  const tb = teamTokens(b);
+  if (!ta.length || !tb.length) return false;
+  const common = ta.filter(token => tb.includes(token)).length;
+  return common / Math.min(ta.length, tb.length) >= 0.5;
+}
+
 function sameFixture(candidate, rawEvent) {
   const candidateId = String(candidate.raw_event_id || candidate.event_id || '');
   const rawId = String(rawEvent.id || rawEvent.event_id || '');
   if (candidateId && rawId && candidateId === rawId) return true;
 
-  const cHome = normalizeName(candidate.home_team);
-  const cAway = normalizeName(candidate.away_team);
-  const rHome = normalizeName(rawEvent.home_team);
-  const rAway = normalizeName(rawEvent.away_team);
   const cStart = parseStartMs(candidate.commence_time);
   const rStart = parseStartMs(rawEvent.commence_time);
-  const closeTime = Number.isFinite(cStart) && Number.isFinite(rStart) && Math.abs(cStart - rStart) <= 15 * 60_000;
+  const closeTime = Number.isFinite(cStart) && Number.isFinite(rStart) && Math.abs(cStart - rStart) <= 60 * 60_000;
+  const sameTeams = similarTeam(candidate.home_team, rawEvent.home_team) && similarTeam(candidate.away_team, rawEvent.away_team);
 
-  return closeTime && cHome && cAway && cHome === rHome && cAway === rAway;
+  return closeTime && sameTeams;
 }
 
 function rawEventHasFreshMarket(rawEvent, marketType) {
@@ -208,7 +222,7 @@ function rawEventHasFreshMarket(rawEvent, marketType) {
   return books.some(book => {
     const age = Number(book.age_seconds);
     if (book.stale === true) return false;
-    if (Number.isFinite(age) && age > 15 * 60) return false;
+    if (Number.isFinite(age) && age > 360 * 60) return false;
     const markets = Array.isArray(book.markets) ? book.markets : [];
     return markets.some(market => String(market.key || '').toLowerCase() === marketType);
   });
@@ -229,13 +243,11 @@ async function verifyAgainstPrematchFeed(candidates, apiKey) {
   const verifiedBySport = new Map();
   await Promise.all([...grouped.entries()].map(async ([sport, marketSet]) => {
     const markets = [...marketSet].join(',');
-    const url = `https://api.puntersedge.online/v1/sports/${encodeURIComponent(sport)}/odds?markets=${encodeURIComponent(markets)}&oddsFormat=decimal&maxAgeMinutes=15`;
+    const url = `https://api.puntersedge.online/v1/sports/${encodeURIComponent(sport)}/odds?markets=${encodeURIComponent(markets)}&oddsFormat=decimal&maxAgeMinutes=360`;
     try {
       const events = await readArray(url, apiKey);
       verifiedBySport.set(sport, events);
     } catch (error) {
-      // Fail closed: if we cannot verify the event on the official pre-match endpoint,
-      // do not show it as a betting opportunity.
       verifiedBySport.set(sport, []);
     }
   }));
@@ -271,7 +283,7 @@ export default async function handler(req, res) {
   const allowedModes = new Set(['all', 'h2h', 'lines', 'spreads', 'totals']);
   const marketMode = allowedModes.has(modeRaw) ? modeRaw : 'all';
 
-  const params = new URLSearchParams({ min_profit_pct: String(effectiveMinProfit), maxAgeMinutes: '15' });
+  const params = new URLSearchParams({ min_profit_pct: String(effectiveMinProfit), maxAgeMinutes: '360' });
   if (sportKey) params.set('sport_key', sportKey);
 
   try {
@@ -295,8 +307,6 @@ export default async function handler(req, res) {
     let combined = uniqueEvents(groups.flat().filter(Boolean))
       .filter(event => isFuturePositiveArb(event, effectiveMinProfit));
 
-    // Final safety gate: an opportunity is shown only if the exact fixture still exists
-    // on PuntersEdge's current pre-match-only odds endpoint with a fresh matching market.
     combined = await verifyAgainstPrematchFeed(combined, apiKey);
 
     combined.sort((a, b) => {
