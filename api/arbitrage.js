@@ -1,17 +1,18 @@
-const ENGINE = 'action-network-v7';
+const ENGINE = 'action-network-v8';
 const FUTURE_BUFFER_MS = 10 * 60 * 1000;
 const ACTION_BASE = 'https://api.actionnetwork.com/web/v2/scoreboard';
+const ACTION_BOOKS = 'https://api.actionnetwork.com/web/v1/books';
 
-const BOOKS = new Map([
-  [68, 'DraftKings'],
-  [69, 'FanDuel'],
-  [75, 'BetMGM'],
-  [123, 'Caesars'],
-  [71, 'BetRivers'],
-  [79, 'bet365'],
+// Union of bookmaker IDs used by working open-source Action Network integrations.
+// 15 and 30 are synthetic/reference lines and are requested for compatibility,
+// but are never treated as real sportsbooks in arbitrage calculations.
+const REQUEST_BOOK_IDS = [
+  15,30,68,69,71,75,79,123,247,270,279,282,510,645,647,841,972,1797,1867,1901,1904,2988,3151,
+];
+const SYNTHETIC_BOOK_IDS = new Set(['15','30']);
+const FALLBACK_BOOK_NAMES = new Map([
+  ['68','DraftKings'],['69','FanDuel'],['71','BetRivers'],['75','BetMGM'],['79','bet365'],['123','Caesars'],['247','Unibet'],['972','BetRivers'],
 ]);
-const BOOK_IDS = [...BOOKS.keys()];
-const REQUEST_BOOK_IDS = [...BOOK_IDS, 15]; // 15 = consensus, requested only as a fallback reference
 
 const SPORTS = {
   nfl: { slug:'nfl', weekly:true },
@@ -30,6 +31,9 @@ const HEADERS = {
   'Referer':'https://www.actionnetwork.com/',
 };
 
+let bookDirectoryCache = null;
+let bookDirectoryAt = 0;
+
 async function getJson(url) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12000);
@@ -40,6 +44,23 @@ async function getJson(url) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function loadBookDirectory() {
+  if (bookDirectoryCache && Date.now() - bookDirectoryAt < 15 * 60 * 1000) return bookDirectoryCache;
+  const directory = new Map(FALLBACK_BOOK_NAMES);
+  try {
+    const payload = await getJson(ACTION_BOOKS);
+    const rows = Array.isArray(payload) ? payload : (payload?.books || payload?.data || []);
+    for (const row of rows) {
+      const id = String(row?.id ?? row?.book_id ?? '');
+      const name = String(row?.display_name || row?.name || row?.title || '').trim();
+      if (id && name) directory.set(id, name);
+    }
+  } catch (_) {}
+  bookDirectoryCache = directory;
+  bookDirectoryAt = Date.now();
+  return directory;
 }
 
 function parseMs(value) {
@@ -73,7 +94,7 @@ function mainLine(list, side) {
     !row?.is_alt_market &&
     (row?.period == null || row?.period === 'event')
   );
-  return rows.find(row => !row?.is_live) || null;
+  return rows.find(row => row?.is_live !== true) || null;
 }
 
 function teamName(game, side) {
@@ -99,6 +120,7 @@ async function fetchSport(sportKey, mode) {
   const config = SPORTS[sportKey];
   if (!config) return { events:[], requests:0, errors:['unsupported sport'] };
 
+  const directory = await loadBookDirectory();
   const dates = config.weekly ? [null] : Array.from({ length: config.days || 2 }, (_, i) => ctDate(i));
   const settled = await Promise.allSettled(dates.map(date => fetchBoard(config, date)));
   const requests = settled.length;
@@ -113,7 +135,7 @@ async function fetchSport(sportKey, mode) {
     seen.add(game.id);
 
     const status = String(game?.status || '').toLowerCase();
-    if (['complete','closed','final','cancelled','postponed'].includes(status)) continue;
+    if (['complete','closed','final','cancelled','postponed','inprogress','in_progress','live'].includes(status)) continue;
 
     const startMs = parseMs(game?.start_time);
     if (!Number.isFinite(startMs) || startMs <= Date.now() + FUTURE_BUFFER_MS) continue;
@@ -123,9 +145,17 @@ async function fetchSport(sportKey, mode) {
     if (!home || !away) continue;
 
     const byBook = [];
-    for (const [bookId, bookName] of BOOKS.entries()) {
-      const ev = game?.markets?.[String(bookId)]?.event;
-      if (!ev) continue;
+    const marketObject = game?.markets && typeof game.markets === 'object' ? game.markets : {};
+
+    // Parse every real sportsbook returned in the response, not only the small
+    // hard-coded starter set. This is the key difference from the earlier zero-result build.
+    for (const [bookId, wrapped] of Object.entries(marketObject)) {
+      if (SYNTHETIC_BOOK_IDS.has(String(bookId))) continue;
+      const ev = wrapped?.event || wrapped;
+      if (!ev || typeof ev !== 'object') continue;
+
+      const bookName = directory.get(String(bookId)) || FALLBACK_BOOK_NAMES.get(String(bookId)) || `Book ${bookId}`;
+      if (/consensus|^open$/i.test(bookName)) continue;
 
       const offers = [];
       if (marketAllowed('h2h', mode)) {
@@ -149,7 +179,7 @@ async function fetchSport(sportKey, mode) {
         if (u?.value != null && u?.odds != null) offers.push({ market:'totals', role:'under', odds:toDecimal(u.odds), point:Number(u.value), book:bookName });
       }
       const clean = offers.filter(x => Number.isFinite(x.odds) && x.odds > 1);
-      if (clean.length) byBook.push({ book:bookName, offers:clean });
+      if (clean.length) byBook.push({ id:String(bookId), book:bookName, offers:clean });
     }
 
     if (byBook.length) events.push({
@@ -264,23 +294,23 @@ export default async function handler(req, res) {
     if (debug) {
       const sports = keys.map((key, i) => {
         const scan = scans[i];
-        const games = scan.events.length;
-        const crossBookGames = scan.events.filter(e => e.books.length >= 2).length;
         const books = [...new Set(scan.events.flatMap(e => e.books.map(b => b.book)))].sort();
+        const ids = [...new Set(scan.events.flatMap(e => e.books.map(b => b.id)))].sort();
         const arbs = scan.events.flatMap(e => arbsForEvent(e, mode));
         return {
           sport_key:key,
           requests:scan.requests,
           errors:scan.errors,
-          games,
-          cross_book_games:crossBookGames,
+          games:scan.events.length,
+          cross_book_games:scan.events.filter(e => e.books.length >= 2).length,
           bookmakers:books,
+          bookmaker_ids:ids,
           bookmaker_count:books.length,
           arbs:arbs.length,
         };
       });
       res.setHeader('Cache-Control','no-store');
-      return res.status(200).json({ engine:ENGINE, book_ids:BOOK_IDS, future_buffer_minutes:FUTURE_BUFFER_MS/60000, sports });
+      return res.status(200).json({ engine:ENGINE, requested_book_ids:REQUEST_BOOK_IDS, future_buffer_minutes:FUTURE_BUFFER_MS/60000, sports });
     }
 
     const events = scans.flatMap(s => s.events);
