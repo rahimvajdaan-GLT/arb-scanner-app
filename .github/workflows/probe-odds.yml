@@ -11,18 +11,13 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve Action Network book IDs
+      - name: Allow Vercel deployment to settle
+        run: sleep 3
+      - name: Probe v6 eight-book coverage
         run: |
-          curl -sS -A 'Mozilla/5.0 Chrome/124 Safari/537.36' 'https://api.actionnetwork.com/web/v1/books' -o /tmp/books.json
-          python - <<'PY'
-          import json
-          wanted={'15','30','75','123','69','68','972','71','247','79'}
-          d=json.load(open('/tmp/books.json'))
-          rows=d.get('books', d if isinstance(d,list) else [])
-          out=[]
-          for b in rows:
-              i=str(b.get('id',''))
-              if i in wanted:
-                  out.append({'id':i,'name':b.get('display_name') or b.get('name'),'active':b.get('active'),'type':b.get('type')})
-          print(out)
-          PY
+          echo '=== SOCCER ==='
+          curl -sS --fail-with-body 'https://arb-scanner-app.vercel.app/api/arbitrage?sport_key=soccer&market_mode=all&debug=1'; echo
+          echo '=== NFL ==='
+          curl -sS --fail-with-body 'https://arb-scanner-app.vercel.app/api/arbitrage?sport_key=nfl&market_mode=all&debug=1'; echo
+          echo '=== ALL PROFITABLE ARBS ==='
+          curl -sS --fail-with-body 'https://arb-scanner-app.vercel.app/api/arbitrage?market_mode=all'; echo
