@@ -25,8 +25,8 @@ let requestSerial = 0;
 function money(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '—';
-  return new Intl.NumberFormat('en-SA', {
-    style: 'currency', currency: 'SAR', minimumFractionDigits: 2, maximumFractionDigits: 2,
+  return new Intl.NumberFormat('en-AU', {
+    style: 'currency', currency: 'AUD', minimumFractionDigits: 2, maximumFractionDigits: 2,
   }).format(n);
 }
 
