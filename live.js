@@ -1,11 +1,13 @@
 const liveEls = {
   scanBtn: document.getElementById('scanLiveBtn'),
   sport: document.getElementById('liveSport'),
+  market: document.getElementById('liveMarket'),
   minProfit: document.getElementById('liveMinProfit'),
   stake: document.getElementById('liveStake'),
   books: document.getElementById('liveBooks'),
   autoRefresh: document.getElementById('autoRefresh'),
   lastUpdated: document.getElementById('lastUpdated'),
+  scanCostText: document.getElementById('scanCostText'),
   message: document.getElementById('liveMessage'),
   results: document.getElementById('liveResults'),
   status: document.getElementById('liveStatus'),
@@ -43,6 +45,23 @@ function clampNumber(value, fallback, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
+function marketLabel(type) {
+  const value = String(type || '').toLowerCase();
+  if (value === 'h2h') return 'Moneyline';
+  if (value === 'spreads') return 'Spread';
+  if (value === 'totals') return 'Total';
+  return value ? value.replaceAll('_', ' ') : 'Market';
+}
+
+function pointText(stake) {
+  const point = Number(stake.point);
+  if (!Number.isFinite(point)) return '';
+  if (String(stake.name).toLowerCase() === 'over' || String(stake.name).toLowerCase() === 'under') {
+    return ` ${point}`;
+  }
+  return ` ${point > 0 ? '+' : ''}${point}`;
+}
+
 function scaleStakes(optimalStakes, totalStake) {
   const clean = optimalStakes
     .map(x => ({ ...x, stake: Number(x.stake || 0) }))
@@ -53,7 +72,11 @@ function scaleStakes(optimalStakes, totalStake) {
 }
 
 function selectionForStake(stake, selections) {
-  return selections.find(x => String(x.name) === String(stake.name)) || {};
+  const exact = selections.find(x =>
+    String(x.name) === String(stake.name) &&
+    (stake.point == null || x.point == null || Number(x.point) === Number(stake.point))
+  );
+  return exact || selections.find(x => String(x.name) === String(stake.name)) || {};
 }
 
 function calculateRoundedPlan(event, totalStake) {
@@ -73,7 +96,8 @@ function calculateRoundedPlan(event, totalStake) {
     const sel = selectionForStake(s, selections);
     const price = Number(sel.best_price || s.price || s.odds || 0);
     const bookmaker = s.bookmaker || sel.best_bookmaker || '';
-    return { ...s, scaledStake: stakeAmount, price, bookmaker };
+    const point = s.point ?? sel.point;
+    return { ...s, scaledStake: stakeAmount, price, bookmaker, point };
   });
 
   if (rounded.some(x => !Number.isFinite(x.price) || x.price <= 1 || x.scaledStake <= 0)) return null;
@@ -106,7 +130,7 @@ function updateMetrics(plans, scanTime = new Date()) {
 
 function buildPlans(events) {
   const totalStake = clampNumber(liveEls.stake.value, 1000, 1, 10000000);
-  const minRoi = clampNumber(liveEls.minProfit.value, 0.5, 0, 50);
+  const minRoi = clampNumber(liveEls.minProfit.value, 0.1, 0, 50);
 
   liveEls.stake.value = String(totalStake);
   liveEls.minProfit.value = String(minRoi);
@@ -131,17 +155,18 @@ function renderLive(events, scanTime = new Date()) {
     liveEls.results.innerHTML = `
       <div class="no-results">
         <div class="no-results-icon">◎</div>
-        <div><strong>No qualifying arbitrage right now</strong><span>Try lowering the minimum ROI, choosing another sport, or clearing the bookmaker filter.</span></div>
+        <div><strong>No qualifying arbitrage right now</strong><span>Try 0.1% ROI, All Sports, All Markets, or clear the bookmaker filter.</span></div>
       </div>`;
     return;
   }
 
-  liveEls.message.textContent = `${plans.length} live arbitrage opportunit${plans.length === 1 ? 'y' : 'ies'} found.`;
+  liveEls.message.textContent = `${plans.length} live arbitrage opportunit${plans.length === 1 ? 'y' : 'ies'} found across the selected markets.`;
 
   plans.forEach(({ event, plan }, index) => {
     const when = event.commence_time ? new Date(event.commence_time).toLocaleString() : 'Time unavailable';
     const sourceRoi = Number(event.arb_pct || 0);
     const sourceRoiText = Number.isFinite(sourceRoi) ? sourceRoi.toFixed(2) : '—';
+    const market = marketLabel(event.market_type);
 
     const card = document.createElement('article');
     card.className = 'live-card';
@@ -150,7 +175,12 @@ function renderLive(events, scanTime = new Date()) {
         <div class="event-title-wrap">
           <div class="rank-badge">#${index + 1}</div>
           <div>
-            <div class="event-meta"><span class="sport-chip">${esc(String(event.sport_key || 'SPORT').toUpperCase())}</span><span>${esc(when)}</span></div>
+            <div class="event-meta">
+              <span class="sport-chip">${esc(String(event.sport_key || 'SPORT').toUpperCase())}</span>
+              <span class="market-chip">${esc(market)}</span>
+              ${event.is_middle ? '<span class="middle-chip">Middle</span>' : ''}
+              <span>${esc(when)}</span>
+            </div>
             <h3>${esc(event.home_team || 'Home')} <span>vs</span> ${esc(event.away_team || 'Away')}</h3>
           </div>
         </div>
@@ -164,7 +194,7 @@ function renderLive(events, scanTime = new Date()) {
         <div><span>Total stake</span><strong>${money(totalStake)}</strong></div>
         <div><span>Guaranteed profit</span><strong class="profit-text">${money(plan.profit)}</strong></div>
         <div><span>Guaranteed return</span><strong>${money(plan.guaranteedReturn)}</strong></div>
-        <div><span>Outcomes</span><strong>${plan.scaled.length}</strong></div>
+        <div><span>Market</span><strong>${esc(market)}</strong></div>
       </div>
 
       <div class="market-label">Stake plan</div>
@@ -172,7 +202,7 @@ function renderLive(events, scanTime = new Date()) {
         ${plan.scaled.map(s => {
           const payout = s.scaledStake * s.price;
           return `<div class="stake-row">
-            <div class="stake-left"><div class="book">${esc(s.bookmaker || 'Bookmaker')}</div><div class="selection">${esc(s.name)} @ ${s.price.toFixed(2)}</div></div>
+            <div class="stake-left"><div class="book">${esc(s.bookmaker || 'Bookmaker')}</div><div class="selection">${esc(s.name)}${esc(pointText(s))} @ ${s.price.toFixed(2)}</div></div>
             <div class="stake-right"><strong>${money(s.scaledStake)}</strong><small>Payout ${money(payout)}</small></div>
           </div>`;
         }).join('')}
@@ -186,20 +216,49 @@ function renderCached() {
   if (latestEvents.length) renderLive(latestEvents, new Date());
 }
 
+function updateScanCost() {
+  const mode = liveEls.market.value;
+  liveEls.scanCostText.textContent = mode === 'all'
+    ? 'All Markets · 6 API credits'
+    : `${marketLabel(mode)} · 3 API credits`;
+}
+
+async function loadSportsCatalog() {
+  try {
+    const response = await fetch('/api/sports', { cache: 'force-cache' });
+    const sports = await response.json();
+    if (!response.ok || !Array.isArray(sports)) return;
+
+    const current = liveEls.sport.value;
+    const active = sports
+      .filter(s => s && s.key && s.title)
+      .sort((a, b) => String(a.group || '').localeCompare(String(b.group || '')) || String(a.title).localeCompare(String(b.title)));
+
+    liveEls.sport.innerHTML = '<option value="">All Sports</option>' + active.map(s =>
+      `<option value="${esc(s.key)}">${esc(s.title)}${s.group ? ` — ${esc(s.group)}` : ''}</option>`
+    ).join('');
+
+    if ([...liveEls.sport.options].some(o => o.value === current)) liveEls.sport.value = current;
+  } catch (_) {
+    // Keep the built-in fallback list if the catalogue cannot load.
+  }
+}
+
 async function scanLive() {
   const serial = ++requestSerial;
   if (activeController) activeController.abort();
   activeController = new AbortController();
 
   liveEls.scanBtn.disabled = true;
-  liveEls.scanBtn.innerHTML = '<span class="spinner"></span> Scanning market…';
+  liveEls.scanBtn.innerHTML = '<span class="spinner"></span> Scanning all selected markets…';
   liveEls.status.textContent = '● Scanning live odds';
-  liveEls.message.textContent = 'Contacting live odds feed…';
+  liveEls.message.textContent = 'Checking bookmaker prices and arbitrage markets…';
   liveEls.results.innerHTML = '<div class="loading-skeleton"><div></div><div></div><div></div></div>';
 
   const params = new URLSearchParams();
   const sport = liveEls.sport.value.trim();
   if (sport) params.set('sport_key', sport);
+  params.set('market_mode', liveEls.market.value || 'all');
   params.set('min_profit_pct', '0');
 
   try {
@@ -258,9 +317,13 @@ liveEls.minProfit.addEventListener('input', renderCached);
 liveEls.stake.addEventListener('input', renderCached);
 liveEls.books.addEventListener('input', renderCached);
 liveEls.sport.addEventListener('change', scanLive);
+liveEls.market.addEventListener('change', () => { updateScanCost(); scanLive(); });
 
 liveEls.stake.addEventListener('keydown', e => { if (e.key === 'Enter') scanLive(); });
 liveEls.books.addEventListener('keydown', e => { if (e.key === 'Enter') renderCached(); });
 
 document.querySelectorAll('[data-roi]').forEach(btn => btn.addEventListener('click', () => setRoiPreset(btn.dataset.roi)));
 document.querySelectorAll('[data-book]').forEach(btn => btn.addEventListener('click', () => setBookPreset(btn.dataset.book)));
+
+updateScanCost();
+loadSportsCatalog();
