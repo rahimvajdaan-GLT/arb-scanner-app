@@ -123,18 +123,32 @@ function uniqueEvents(events) {
   return output;
 }
 
+function parseStartMs(value) {
+  if (!value) return NaN;
+  if (typeof value === 'number') return value > 1e12 ? value : value * 1000;
+
+  const raw = String(value).trim();
+  if (!raw) return NaN;
+
+  // PuntersEdge normally returns ISO timestamps. If an offset is missing,
+  // interpret the timestamp as UTC instead of server-local time.
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw);
+  const normalized = hasZone ? raw : `${raw}Z`;
+  return Date.parse(normalized);
+}
+
 function isFuturePositiveArb(event, minProfitPct = 0) {
   if (!event || event.is_arb !== true) return false;
 
   const profitPct = Number(event.arb_pct || event.arb_profit_pct || 0);
   if (!Number.isFinite(profitPct) || profitPct <= Math.max(0, minProfitPct)) return false;
 
-  if (!event.commence_time) return false;
-  const startMs = Date.parse(event.commence_time);
+  const startMs = parseStartMs(event.commence_time);
   if (!Number.isFinite(startMs)) return false;
 
-  // Do not show games that have already started. A 60-second buffer avoids borderline stale events.
-  return startMs > Date.now() + 60_000;
+  // Keep only genuinely upcoming events. The 2-minute safety buffer prevents
+  // a game that is about to start from lingering on the board because of feed/cache delay.
+  return startMs > Date.now() + 2 * 60_000;
 }
 
 export default async function handler(req, res) {
@@ -179,9 +193,14 @@ export default async function handler(req, res) {
     const groups = await Promise.all(requests);
     const combined = uniqueEvents(groups.flat().filter(Boolean))
       .filter(event => isFuturePositiveArb(event, effectiveMinProfit))
-      .sort((a, b) => Number(b.arb_pct || 0) - Number(a.arb_pct || 0));
+      .sort((a, b) => {
+        const timeDiff = parseStartMs(a.commence_time) - parseStartMs(b.commence_time);
+        if (timeDiff !== 0) return timeDiff;
+        return Number(b.arb_pct || 0) - Number(a.arb_pct || 0);
+      });
 
-    res.setHeader('Cache-Control', 's-maxage=15, stale-while-revalidate=30');
+    // Do not cache arbitrage responses: once a match starts it must disappear immediately.
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
     return res.status(200).json(combined);
   } catch (error) {
     return res.status(error.status || 500).json({
