@@ -61,6 +61,30 @@ function pointText(stake) {
   return ` ${point > 0 ? '+' : ''}${point}`;
 }
 
+function betInstruction(event, stake) {
+  const market = String(event.market_type || '').toLowerCase();
+  const name = String(stake.name || '').trim();
+  const nameLower = name.toLowerCase();
+  const point = Number(stake.point);
+
+  if (market === 'h2h') {
+    if (['draw', 'tie'].includes(nameLower)) return 'BET DRAW';
+    return `BET ${name} TO WIN`;
+  }
+
+  if (market === 'totals') {
+    const total = Number.isFinite(point) ? ` ${point}` : '';
+    return `BET ${name.toUpperCase()}${total}`;
+  }
+
+  if (market === 'spreads') {
+    const line = Number.isFinite(point) ? ` ${point > 0 ? '+' : ''}${point}` : '';
+    return `BET ${name}${line}`;
+  }
+
+  return `BET ${name}${pointText(stake)}`;
+}
+
 function parseStartMs(value) {
   if (!value) return NaN;
   if (typeof value === 'number') return value > 1e12 ? value : value * 1000;
@@ -235,11 +259,25 @@ function renderLive(events, scanTime = latestScanTime || new Date()) {
         <div><span>Market</span><strong>${esc(market)}</strong></div>
       </div>
 
-      <div class="market-label">Stake Split</div>
+      <div class="bet-help">Place <strong>every bet below</strong> at the listed bookmaker. This is arbitrage coverage, not a prediction of which team will win.</div>
+      <div class="market-label">Exact bets to place</div>
       <div class="stake-plan live-stakes">
-        ${plan.scaled.map(s => {
+        ${plan.scaled.map((s, betIndex) => {
           const payout = s.scaledStake * s.price;
-          return `<div class="stake-row"><div class="stake-left"><div class="book">${esc(s.bookmaker || 'Bookmaker')}</div><div class="selection">${esc(s.name)}${esc(pointText(s))} @ ${s.price.toFixed(2)}</div></div><div class="stake-right"><strong>${money(s.scaledStake)}</strong><small>Payout ${money(payout)}</small></div></div>`;
+          const instruction = betInstruction(event, s);
+          return `<div class="stake-row bet-instruction-row">
+            <div class="stake-left">
+              <div class="bet-number">BET ${betIndex + 1}</div>
+              <div class="bet-action">${esc(instruction)}</div>
+              <div class="book">At ${esc(s.bookmaker || 'Bookmaker')}</div>
+              <div class="selection">Odds ${s.price.toFixed(2)}</div>
+            </div>
+            <div class="stake-right">
+              <span class="stake-label">STAKE</span>
+              <strong>${money(s.scaledStake)}</strong>
+              <small>Quoted payout ${money(payout)}</small>
+            </div>
+          </div>`;
         }).join('')}
       </div>
     `;
