@@ -1,0 +1,163 @@
+:root{
+  --bg:#08172f;
+  --bg2:#10244a;
+  --panel:#16315f;
+  --panel2:#1d3c73;
+  --text:#ffffff;
+  --muted:#c8d6f2;
+  --line:rgba(255,255,255,.16);
+  --green:#43f0b2;
+  --green2:#17b983;
+  --greenSoft:rgba(67,240,178,.16);
+  --red:#ff7897;
+  --blue:#4ea7ff;
+  --blue2:#a6ceff;
+  --amber:#ffd66e;
+  --shadow:0 18px 55px rgba(9,22,54,.34);
+}
+body{
+  background:
+    radial-gradient(circle at 12% 8%,rgba(78,167,255,.36),transparent 28%),
+    radial-gradient(circle at 86% 3%,rgba(155,92,246,.28),transparent 27%),
+    radial-gradient(circle at 90% 82%,rgba(31,214,255,.18),transparent 22%),
+    linear-gradient(180deg,#0d2144 0%,#08142b 58%,#061021 100%);
+}
+.sidebar{
+  background:linear-gradient(180deg,rgba(13,29,59,.96),rgba(8,20,42,.94));
+  border-right-color:rgba(165,205,255,.18);
+}
+.brand-mark{
+  background:linear-gradient(135deg,#42b8ff,#755cff 58%,#b14fff);
+  box-shadow:0 14px 38px rgba(82,119,255,.48),0 0 28px rgba(65,190,255,.18);
+}
+.brand{color:#fff}.brand-sub{color:#abc8f2}
+.nav-item{color:#afc3e7}
+.nav-item:hover,.nav-item.active{
+  background:linear-gradient(135deg,rgba(72,165,255,.22),rgba(126,87,255,.18));
+  border:1px solid rgba(151,194,255,.14);
+  color:#fff;
+  box-shadow:inset 0 0 24px rgba(100,140,255,.06);
+}
+.sidebar-status,.side-note{
+  background:linear-gradient(180deg,rgba(42,74,130,.24),rgba(22,44,82,.2));
+  border-color:rgba(166,205,255,.14);
+}
+.topbar h1{
+  background:linear-gradient(90deg,#fff 0%,#d9edff 38%,#b6b4ff 72%,#d9a7ff 100%);
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+  text-shadow:0 8px 28px rgba(80,140,255,.10);
+}
+.topbar p,.section-head p{color:#bfd0ed}
+.eyebrow{color:#7fc5ff}
+.status-pill,.scan-health{
+  color:#dcebff;
+  background:linear-gradient(135deg,rgba(65,164,255,.18),rgba(128,88,255,.14));
+  border-color:rgba(151,198,255,.22);
+  box-shadow:0 0 30px rgba(78,167,255,.10);
+}
+.metric-card,.card{
+  background:linear-gradient(180deg,rgba(31,65,120,.76),rgba(17,39,78,.84));
+  border-color:rgba(170,209,255,.16);
+  box-shadow:0 18px 50px rgba(4,16,40,.28),inset 0 1px 0 rgba(255,255,255,.03);
+}
+.metric-card{position:relative;overflow:hidden}
+.metric-card::before{
+  content:"";position:absolute;left:0;right:0;top:0;height:3px;
+  background:linear-gradient(90deg,#38bdf8,#60a5fa,#8b5cf6,#d946ef);
+}
+.metric-card:hover{border-color:rgba(126,190,255,.30);transform:translateY(-2px)}
+.metric-card span,.metric-card small{color:#b9cae9}.metric-card strong{color:#fff}
+.scanner-card{
+  border-color:rgba(151,202,255,.2);
+  box-shadow:0 24px 70px rgba(0,15,45,.35),0 0 0 1px rgba(90,168,255,.05);
+}
+.filter-panel{
+  background:linear-gradient(180deg,rgba(16,42,88,.72),rgba(12,32,68,.82));
+  border-color:rgba(157,203,255,.15);
+}
+input,select{
+  background:linear-gradient(180deg,rgba(18,47,97,.94),rgba(11,34,73,.96));
+  border-color:rgba(170,209,255,.18);
+  color:#fff;
+}
+input::placeholder{color:#7897c4}
+input:focus,select:focus{
+  border-color:#58afff;
+  box-shadow:0 0 0 3px rgba(78,167,255,.16),0 0 26px rgba(67,168,255,.12);
+}
+.primary-btn{
+  background:linear-gradient(135deg,#36b8ff 0%,#6375ff 48%,#9f5cff 100%);
+  box-shadow:0 14px 34px rgba(90,107,255,.32),0 0 25px rgba(57,184,255,.10);
+}
+.primary-btn:hover{box-shadow:0 18px 42px rgba(90,107,255,.44),0 0 34px rgba(57,184,255,.16)}
+.secondary-btn{
+  background:linear-gradient(180deg,rgba(51,89,151,.28),rgba(30,61,111,.25));
+  color:#d8e8ff;border-color:rgba(166,207,255,.18)
+}
+.mode-switch,.chip-btn{
+  background:rgba(42,77,136,.30);
+  border-color:rgba(160,204,255,.15)
+}
+.mode-btn.active,.chip-btn.active{
+  background:linear-gradient(135deg,rgba(71,167,255,.72),rgba(115,88,255,.68));
+  color:#fff;
+  border-color:rgba(175,208,255,.20)
+}
+.chip-btn:hover{background:rgba(81,150,255,.18);border-color:rgba(111,185,255,.34)}
+.toggle-ui{background:#2a4a7f;border-color:rgba(166,207,255,.18)}
+.toggle-row input:checked+.toggle-ui{background:linear-gradient(135deg,#10b981,#43f0b2)}
+.live-card{
+  background:linear-gradient(180deg,rgba(32,66,121,.80),rgba(17,40,80,.88));
+  border-color:rgba(170,209,255,.16);
+  box-shadow:0 12px 30px rgba(3,16,42,.22);
+}
+.live-card::before{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
+  background:linear-gradient(180deg,#38bdf8,#6366f1,#a855f7);
+}
+.live-card:hover{
+  border-color:rgba(99,184,255,.34);
+  box-shadow:0 18px 40px rgba(3,16,42,.30),0 0 28px rgba(56,189,248,.10);
+}
+.rank-badge,.sport-chip{
+  background:linear-gradient(135deg,rgba(62,174,255,.20),rgba(123,92,255,.20));
+  border:1px solid rgba(170,209,255,.15);
+  color:#d9ecff;
+}
+.roi-badge.good{
+  color:#eafff6;
+  background:linear-gradient(135deg,rgba(16,185,129,.42),rgba(67,240,178,.18));
+  border:1px solid rgba(75,244,181,.18);
+}
+.roi-badge.bad{
+  color:#ffe6eb;
+  background:linear-gradient(135deg,rgba(255,93,132,.35),rgba(255,120,151,.15));
+  border:1px solid rgba(255,130,159,.16);
+}
+.live-summary>div,.stat,.stake-row,.outcome-card{
+  background:linear-gradient(180deg,rgba(34,72,132,.56),rgba(21,49,93,.58));
+  border-color:rgba(170,209,255,.13);
+}
+.live-summary>div:hover,.stake-row:hover,.outcome-card:hover{border-color:rgba(100,184,255,.28)}
+.live-summary span,.stat span,.stake-row .selection,.stake-right small,.event-meta{color:#b9cae9}
+.profit-text,.stake-right strong,.stake-row .amount{color:#49f1b4}
+.formula-box{
+  background:linear-gradient(180deg,rgba(19,47,96,.88),rgba(12,32,68,.92));
+  border-color:rgba(170,209,255,.14)
+}
+.warning-box{
+  background:linear-gradient(180deg,rgba(255,197,77,.13),rgba(255,197,77,.06));
+  border-color:rgba(255,216,125,.2)
+}
+.no-results,.error-panel{
+  background:linear-gradient(180deg,rgba(29,60,111,.55),rgba(18,42,80,.52));
+  border-color:rgba(170,209,255,.18)
+}
+.loading-skeleton div{
+  background:linear-gradient(90deg,rgba(255,255,255,.04),rgba(107,183,255,.18),rgba(255,255,255,.04));
+  background-size:200% 100%
+}
+footer{color:#9eb7db}
+@media(max-width:980px){.sidebar{background:linear-gradient(180deg,rgba(13,29,59,.98),rgba(8,20,42,.98))}}
