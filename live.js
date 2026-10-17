@@ -16,11 +16,16 @@ const liveEls = {
 };
 
 let refreshTimer = null;
+let latestEvents = [];
+let activeController = null;
+let requestSerial = 0;
 
 function money(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '—';
   return new Intl.NumberFormat('en-SA', {
     style: 'currency', currency: 'SAR', minimumFractionDigits: 2, maximumFractionDigits: 2,
-  }).format(value);
+  }).format(n);
 }
 
 function esc(value) {
@@ -32,35 +37,53 @@ function esc(value) {
     .replaceAll("'", '&#039;');
 }
 
-function scaleStakes(optimalStakes, totalStake) {
-  const baseTotal = optimalStakes.reduce((sum, x) => sum + Number(x.stake || 0), 0);
-  if (!baseTotal) return [];
-  return optimalStakes.map(x => ({ ...x, scaledStake: totalStake * Number(x.stake || 0) / baseTotal }));
+function clampNumber(value, fallback, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
 }
 
-function getPriceForStake(stake, selections) {
-  const sel = selections.find(x => String(x.name) === String(stake.name)) || {};
-  return Number(sel.best_price || stake.price || stake.odds || 0);
+function scaleStakes(optimalStakes, totalStake) {
+  const clean = optimalStakes
+    .map(x => ({ ...x, stake: Number(x.stake || 0) }))
+    .filter(x => Number.isFinite(x.stake) && x.stake > 0);
+  const baseTotal = clean.reduce((sum, x) => sum + x.stake, 0);
+  if (!baseTotal) return [];
+  return clean.map(x => ({ ...x, scaledStake: totalStake * x.stake / baseTotal }));
+}
+
+function selectionForStake(stake, selections) {
+  return selections.find(x => String(x.name) === String(stake.name)) || {};
 }
 
 function calculateRoundedPlan(event, totalStake) {
   const optimal = Array.isArray(event.optimal_stakes) ? event.optimal_stakes : [];
   const selections = Array.isArray(event.selections) ? event.selections : [];
   const scaled = scaleStakes(optimal, totalStake);
-  if (!scaled.length) return { scaled: [], guaranteedReturn: 0, profit: 0, roi: Number(event.arb_pct || 0) };
+  if (!scaled.length) return null;
 
+  let used = 0;
   const rounded = scaled.map((s, i) => {
-    const stake = i === scaled.length - 1
-      ? Math.round((totalStake - scaled.slice(0, -1).reduce((sum, x) => sum + Math.round(x.scaledStake * 100) / 100, 0)) * 100) / 100
+    const rawStake = i === scaled.length - 1
+      ? totalStake - used
       : Math.round(s.scaledStake * 100) / 100;
-    const price = getPriceForStake(s, selections);
-    return { ...s, scaledStake: Math.max(0, stake), price };
+    const stakeAmount = Math.max(0, Math.round(rawStake * 100) / 100);
+    used += stakeAmount;
+
+    const sel = selectionForStake(s, selections);
+    const price = Number(sel.best_price || s.price || s.odds || 0);
+    const bookmaker = s.bookmaker || sel.best_bookmaker || '';
+    return { ...s, scaledStake: stakeAmount, price, bookmaker };
   });
 
-  const payouts = rounded.map(x => x.price > 0 ? x.scaledStake * x.price : Infinity);
-  const guaranteedReturn = payouts.length ? Math.min(...payouts) : 0;
+  if (rounded.some(x => !Number.isFinite(x.price) || x.price <= 1 || x.scaledStake <= 0)) return null;
+
+  const payouts = rounded.map(x => x.scaledStake * x.price);
+  const guaranteedReturn = Math.min(...payouts);
   const profit = guaranteedReturn - totalStake;
   const roi = totalStake > 0 ? (profit / totalStake) * 100 : 0;
+
+  if (!Number.isFinite(guaranteedReturn) || !Number.isFinite(profit) || !Number.isFinite(roi)) return null;
   return { scaled: rounded, guaranteedReturn, profit, roi };
 }
 
@@ -72,36 +95,43 @@ function bookmakerMatches(plan) {
   return wanted.some(w => books.some(b => b.includes(w)));
 }
 
-function updateMetrics(plans) {
-  const now = new Date();
+function updateMetrics(plans, scanTime = new Date()) {
   const best = plans[0];
   liveEls.metricCount.textContent = String(plans.length);
-  liveEls.metricBestRoi.textContent = best ? `+${best.plan.roi.toFixed(2)}%` : '—';
+  liveEls.metricBestRoi.textContent = best ? `${best.plan.roi >= 0 ? '+' : ''}${best.plan.roi.toFixed(2)}%` : '—';
   liveEls.metricBestProfit.textContent = best ? money(best.plan.profit) : '—';
-  liveEls.metricLastScan.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  liveEls.lastUpdated.textContent = now.toLocaleTimeString();
+  liveEls.metricLastScan.textContent = scanTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  liveEls.lastUpdated.textContent = scanTime.toLocaleTimeString();
 }
 
-function renderLive(events) {
-  const totalStake = Math.max(1, Number(liveEls.stake.value) || 1000);
-  const minRoi = Math.max(0, Number(liveEls.minProfit.value) || 0);
+function buildPlans(events) {
+  const totalStake = clampNumber(liveEls.stake.value, 1000, 1, 10000000);
+  const minRoi = clampNumber(liveEls.minProfit.value, 0.5, 0, 50);
 
-  let plans = events
+  liveEls.stake.value = String(totalStake);
+  liveEls.minProfit.value = String(minRoi);
+
+  return events
     .filter(e => e && e.is_arb === true)
     .map(event => ({ event, plan: calculateRoundedPlan(event, totalStake) }))
-    .filter(item => item.plan.roi >= minRoi)
-    .filter(bookmakerMatches)
+    .filter(item => item.plan && item.plan.roi >= minRoi)
+    .filter(item => bookmakerMatches(item.plan))
     .sort((a, b) => b.plan.roi - a.plan.roi);
+}
+
+function renderLive(events, scanTime = new Date()) {
+  const totalStake = clampNumber(liveEls.stake.value, 1000, 1, 10000000);
+  const plans = buildPlans(events);
 
   liveEls.results.innerHTML = '';
-  updateMetrics(plans);
+  updateMetrics(plans, scanTime);
 
   if (!plans.length) {
-    liveEls.message.textContent = 'No opportunities match your current sport, ROI and bookmaker filters.';
+    liveEls.message.textContent = 'No opportunities match your current ROI and bookmaker filters.';
     liveEls.results.innerHTML = `
       <div class="no-results">
         <div class="no-results-icon">◎</div>
-        <div><strong>No qualifying arbitrage right now</strong><span>Try lowering the minimum ROI, choosing All Sports, or clearing the bookmaker filter.</span></div>
+        <div><strong>No qualifying arbitrage right now</strong><span>Try lowering the minimum ROI, choosing another sport, or clearing the bookmaker filter.</span></div>
       </div>`;
     return;
   }
@@ -110,8 +140,8 @@ function renderLive(events) {
 
   plans.forEach(({ event, plan }, index) => {
     const when = event.commence_time ? new Date(event.commence_time).toLocaleString() : 'Time unavailable';
-    const selections = Array.isArray(event.selections) ? event.selections : [];
     const sourceRoi = Number(event.arb_pct || 0);
+    const sourceRoiText = Number.isFinite(sourceRoi) ? sourceRoi.toFixed(2) : '—';
 
     const card = document.createElement('article');
     card.className = 'live-card';
@@ -126,7 +156,7 @@ function renderLive(events) {
         </div>
         <div class="roi-stack">
           <div class="roi-badge good">+${plan.roi.toFixed(2)}%</div>
-          <small>feed ${sourceRoi.toFixed(2)}%</small>
+          <small>feed ${sourceRoiText}%</small>
         </div>
       </div>
 
@@ -140,12 +170,9 @@ function renderLive(events) {
       <div class="market-label">Stake plan</div>
       <div class="stake-plan live-stakes">
         ${plan.scaled.map(s => {
-          const sel = selections.find(x => String(x.name) === String(s.name)) || {};
-          const price = Number(sel.best_price || s.price || 0);
-          const book = s.bookmaker || sel.best_bookmaker || 'Bookmaker';
-          const payout = price > 0 ? s.scaledStake * price : 0;
+          const payout = s.scaledStake * s.price;
           return `<div class="stake-row">
-            <div class="stake-left"><div class="book">${esc(book)}</div><div class="selection">${esc(s.name)}${price ? ` @ ${price.toFixed(2)}` : ''}</div></div>
+            <div class="stake-left"><div class="book">${esc(s.bookmaker || 'Bookmaker')}</div><div class="selection">${esc(s.name)} @ ${s.price.toFixed(2)}</div></div>
             <div class="stake-right"><strong>${money(s.scaledStake)}</strong><small>Payout ${money(payout)}</small></div>
           </div>`;
         }).join('')}
@@ -155,7 +182,15 @@ function renderLive(events) {
   });
 }
 
+function renderCached() {
+  if (latestEvents.length) renderLive(latestEvents, new Date());
+}
+
 async function scanLive() {
+  const serial = ++requestSerial;
+  if (activeController) activeController.abort();
+  activeController = new AbortController();
+
   liveEls.scanBtn.disabled = true;
   liveEls.scanBtn.innerHTML = '<span class="spinner"></span> Scanning market…';
   liveEls.status.textContent = '● Scanning live odds';
@@ -168,35 +203,64 @@ async function scanLive() {
   params.set('min_profit_pct', '0');
 
   try {
-    const response = await fetch(`/api/arbitrage?${params.toString()}`, { cache: 'no-store' });
+    const response = await fetch(`/api/arbitrage?${params.toString()}`, {
+      cache: 'no-store',
+      signal: activeController.signal,
+    });
     const data = await response.json();
     if (!response.ok) {
       const detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail || '');
       throw new Error(`${data.error || 'Live scan failed'}${detail ? ` — ${detail}` : ''}`);
     }
-    renderLive(Array.isArray(data) ? data : []);
+    if (serial !== requestSerial) return;
+
+    latestEvents = Array.isArray(data) ? data : [];
+    const now = new Date();
+    renderLive(latestEvents, now);
     liveEls.status.textContent = '● Live connected';
   } catch (error) {
+    if (error.name === 'AbortError') return;
     liveEls.message.textContent = error.message;
     liveEls.status.textContent = '● Live error';
     liveEls.results.innerHTML = `<div class="error-panel"><strong>Unable to complete scan</strong><span>${esc(error.message)}</span></div>`;
   } finally {
-    liveEls.scanBtn.disabled = false;
-    liveEls.scanBtn.innerHTML = '<span class="btn-icon">⌁</span> Scan Live Opportunities';
+    if (serial === requestSerial) {
+      liveEls.scanBtn.disabled = false;
+      liveEls.scanBtn.innerHTML = '<span class="btn-icon">⌁</span> Scan Live Opportunities';
+    }
   }
 }
 
 function configureAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = null;
-  if (liveEls.autoRefresh.checked) refreshTimer = setInterval(scanLive, 60000);
+  if (liveEls.autoRefresh.checked) {
+    if (!latestEvents.length) scanLive();
+    refreshTimer = setInterval(scanLive, 60000);
+  }
+}
+
+function setRoiPreset(value) {
+  liveEls.minProfit.value = value;
+  document.querySelectorAll('[data-roi]').forEach(btn => btn.classList.toggle('active', btn.dataset.roi === String(value)));
+  renderCached();
+}
+
+function setBookPreset(value) {
+  liveEls.books.value = value;
+  document.querySelectorAll('[data-book]').forEach(btn => btn.classList.toggle('active', value && btn.dataset.book === value));
+  renderCached();
 }
 
 liveEls.scanBtn.addEventListener('click', scanLive);
 liveEls.autoRefresh.addEventListener('change', configureAutoRefresh);
-liveEls.minProfit.addEventListener('change', () => {
-  if (liveEls.results.children.length) scanLive();
-});
-liveEls.sport.addEventListener('change', () => {
-  if (liveEls.results.children.length) scanLive();
-});
+liveEls.minProfit.addEventListener('input', renderCached);
+liveEls.stake.addEventListener('input', renderCached);
+liveEls.books.addEventListener('input', renderCached);
+liveEls.sport.addEventListener('change', scanLive);
+
+liveEls.stake.addEventListener('keydown', e => { if (e.key === 'Enter') scanLive(); });
+liveEls.books.addEventListener('keydown', e => { if (e.key === 'Enter') renderCached(); });
+
+document.querySelectorAll('[data-roi]').forEach(btn => btn.addEventListener('click', () => setRoiPreset(btn.dataset.roi)));
+document.querySelectorAll('[data-book]').forEach(btn => btn.addEventListener('click', () => setBookPreset(btn.dataset.book)));
