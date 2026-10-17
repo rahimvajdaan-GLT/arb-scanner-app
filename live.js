@@ -16,7 +16,7 @@ const liveEls = {
 };
 
 const DISPLAY_TARGET = 10;
-const FUTURE_BUFFER_MS = 2 * 60 * 1000;
+const FUTURE_BUFFER_MS = 10 * 60 * 1000;
 let refreshTimer = null;
 let latestEvents = [];
 let activeController = null;
@@ -71,17 +71,14 @@ function betInstruction(event, stake) {
     if (['draw', 'tie'].includes(nameLower)) return 'BET DRAW';
     return `BET ${name} TO WIN`;
   }
-
   if (market === 'totals') {
     const total = Number.isFinite(point) ? ` ${point}` : '';
     return `BET ${name.toUpperCase()}${total}`;
   }
-
   if (market === 'spreads') {
     const line = Number.isFinite(point) ? ` ${point > 0 ? '+' : ''}${point}` : '';
     return `BET ${name}${line}`;
   }
-
   return `BET ${name}${pointText(stake)}`;
 }
 
@@ -92,6 +89,16 @@ function parseStartMs(value) {
   if (!raw) return NaN;
   const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw);
   return Date.parse(hasZone ? raw : `${raw}Z`);
+}
+
+function isInPlayOrStarted(event) {
+  if (!event) return true;
+  const flags = [event.is_live, event.live, event.in_play, event.inplay, event.is_inplay, event.started, event.has_started, event.completed];
+  if (flags.some(value => value === true || value === 1 || String(value).toLowerCase() === 'true')) return true;
+
+  const statusText = [event.status, event.state, event.match_status, event.event_status, event.phase, event.market_status]
+    .filter(Boolean).join(' ').toLowerCase();
+  return /(in[-_ ]?play|live|started|playing|ongoing|half[-_ ]?time|halftime|finished|completed|ended)/i.test(statusText);
 }
 
 function scaleStakes(optimalStakes, totalStake) {
@@ -120,11 +127,9 @@ function deriveOptimalFromSelections(selections) {
       bookmaker: sel.best_bookmaker || sel.bookmaker || '',
     }))
     .filter(sel => sel.name && Number.isFinite(sel.price) && sel.price > 1);
-
   if (usable.length < 2) return [];
   const inverseSum = usable.reduce((sum, sel) => sum + (1 / sel.price), 0);
   if (!Number.isFinite(inverseSum) || inverseSum <= 0) return [];
-
   return usable.map(sel => ({ ...sel, stake: ((1 / sel.price) / inverseSum) * 100 }));
 }
 
@@ -132,7 +137,6 @@ function calculateRoundedPlan(event, totalStake) {
   const selections = Array.isArray(event.selections) ? event.selections : [];
   let optimal = Array.isArray(event.optimal_stakes) ? event.optimal_stakes : [];
   if (!optimal.length) optimal = deriveOptimalFromSelections(selections);
-
   const scaled = scaleStakes(optimal, totalStake);
   if (!scaled.length) return null;
 
@@ -141,7 +145,6 @@ function calculateRoundedPlan(event, totalStake) {
     const rawStake = i === scaled.length - 1 ? totalStake - used : Math.round(s.scaledStake * 100) / 100;
     const stakeAmount = Math.max(0, Math.round(rawStake * 100) / 100);
     used += stakeAmount;
-
     const sel = selectionForStake(s, selections);
     const price = Number(sel.best_price || s.price || s.odds || 0);
     const bookmaker = s.bookmaker || sel.best_bookmaker || '';
@@ -150,12 +153,10 @@ function calculateRoundedPlan(event, totalStake) {
   });
 
   if (rounded.some(x => !Number.isFinite(x.price) || x.price <= 1 || x.scaledStake <= 0)) return null;
-
   const payouts = rounded.map(x => x.scaledStake * x.price);
   const guaranteedReturn = Math.min(...payouts);
   const profit = guaranteedReturn - totalStake;
   const roi = totalStake > 0 ? (profit / totalStake) * 100 : 0;
-
   if (![guaranteedReturn, profit, roi].every(Number.isFinite)) return null;
   return { scaled: rounded, guaranteedReturn, profit, roi };
 }
@@ -169,6 +170,7 @@ function bookmakerMatches(plan) {
 }
 
 function isFutureEvent(event) {
+  if (isInPlayOrStarted(event)) return false;
   const start = parseStartMs(event?.commence_time);
   return Number.isFinite(start) && start > Date.now() + FUTURE_BUFFER_MS;
 }
@@ -176,7 +178,6 @@ function isFutureEvent(event) {
 function buildBoard(events) {
   const totalStake = clampNumber(liveEls.stake.value, 1000, 1, 10000000);
   liveEls.stake.value = String(totalStake);
-
   const trueArbs = events
     .filter(Boolean)
     .filter(isFutureEvent)
@@ -189,7 +190,6 @@ function buildBoard(events) {
       if (timeDiff !== 0) return timeDiff;
       return b.plan.roi - a.plan.roi;
     });
-
   return { board: trueArbs.slice(0, DISPLAY_TARGET), trueArbs };
 }
 
@@ -209,22 +209,18 @@ function renderLive(events, scanTime = latestScanTime || new Date()) {
   updateMetrics(trueArbs, board, scanTime);
 
   if (!board.length) {
-    liveEls.message.textContent = 'No future positive arbitrage opportunities match your current filters.';
-    liveEls.results.innerHTML = `<div class="no-results"><div class="no-results-icon">◎</div><div><strong>No positive future arbs right now</strong><span>Only matches that have not started are shown. Try All Sports, All Markets, or clear the bookmaker filter.</span></div></div>`;
+    liveEls.message.textContent = 'No pre-match positive arbitrage opportunities match your current filters.';
+    liveEls.results.innerHTML = `<div class="no-results"><div class="no-results-icon">◎</div><div><strong>No pre-match positive arbs right now</strong><span>In-play and games starting within 10 minutes are hidden. Try All Sports, All Markets, or clear the bookmaker filter.</span></div></div>`;
     return;
   }
 
-  liveEls.message.textContent = `${trueArbs.length} future positive true arb${trueArbs.length === 1 ? '' : 's'} found · ${board.length} shown`;
+  liveEls.message.textContent = `${trueArbs.length} pre-match positive true arb${trueArbs.length === 1 ? '' : 's'} found · ${board.length} shown`;
 
   board.forEach(({ event, plan }, index) => {
     const startMs = parseStartMs(event.commence_time);
     const when = new Date(startMs).toLocaleString('en-AU');
     const minutesToStart = Math.max(0, Math.floor((startMs - Date.now()) / 60000));
-    const startsText = minutesToStart < 60
-      ? `Starts in ${minutesToStart} min`
-      : minutesToStart < 1440
-        ? `Starts in ${Math.floor(minutesToStart / 60)}h ${minutesToStart % 60}m`
-        : `Starts ${when}`;
+    const startsText = minutesToStart < 60 ? `Starts in ${minutesToStart} min` : minutesToStart < 1440 ? `Starts in ${Math.floor(minutesToStart / 60)}h ${minutesToStart % 60}m` : `Starts ${when}`;
     const sourceRoi = Number(event.arb_pct || 0);
     const sourceRoiText = Number.isFinite(sourceRoi) && sourceRoi > 0 ? sourceRoi.toFixed(2) : null;
     const market = marketLabel(event.market_type);
@@ -239,7 +235,7 @@ function renderLive(events, scanTime = latestScanTime || new Date()) {
             <div class="event-meta">
               <span class="sport-chip">${esc(String(event.sport_key || 'SPORT').toUpperCase())}</span>
               <span class="market-chip">${esc(market)}</span>
-              <span class="guarantee-chip">FUTURE TRUE ARB</span>
+              <span class="guarantee-chip">PRE-MATCH TRUE ARB</span>
               <span>${esc(startsText)}</span>
             </div>
             <h3>${esc(event.home_team || 'Home')} <span>vs</span> ${esc(event.away_team || 'Away')}</h3>
@@ -251,33 +247,19 @@ function renderLive(events, scanTime = latestScanTime || new Date()) {
           <small>${sourceRoiText ? `feed ${sourceRoiText}%` : 'positive arb'}</small>
         </div>
       </div>
-
       <div class="live-summary">
         <div><span>Total Stake</span><strong>${money(totalStake)}</strong></div>
         <div><span>Quoted Profit</span><strong class="profit-text">${money(plan.profit)}</strong></div>
         <div><span>Quoted Return</span><strong>${money(plan.guaranteedReturn)}</strong></div>
         <div><span>Market</span><strong>${esc(market)}</strong></div>
       </div>
-
       <div class="bet-help">Place <strong>every bet below</strong> at the listed bookmaker. This is arbitrage coverage, not a prediction of which team will win.</div>
       <div class="market-label">Exact bets to place</div>
       <div class="stake-plan live-stakes">
         ${plan.scaled.map((s, betIndex) => {
           const payout = s.scaledStake * s.price;
           const instruction = betInstruction(event, s);
-          return `<div class="stake-row bet-instruction-row">
-            <div class="stake-left">
-              <div class="bet-number">BET ${betIndex + 1}</div>
-              <div class="bet-action">${esc(instruction)}</div>
-              <div class="book">At ${esc(s.bookmaker || 'Bookmaker')}</div>
-              <div class="selection">Odds ${s.price.toFixed(2)}</div>
-            </div>
-            <div class="stake-right">
-              <span class="stake-label">STAKE</span>
-              <strong>${money(s.scaledStake)}</strong>
-              <small>Quoted payout ${money(payout)}</small>
-            </div>
-          </div>`;
+          return `<div class="stake-row bet-instruction-row"><div class="stake-left"><div class="bet-number">BET ${betIndex + 1}</div><div class="bet-action">${esc(instruction)}</div><div class="book">At ${esc(s.bookmaker || 'Bookmaker')}</div><div class="selection">Odds ${s.price.toFixed(2)}</div></div><div class="stake-right"><span class="stake-label">STAKE</span><strong>${money(s.scaledStake)}</strong><small>Quoted payout ${money(payout)}</small></div></div>`;
         }).join('')}
       </div>
     `;
@@ -294,12 +276,8 @@ async function loadSportsCatalog() {
     const response = await fetch('/api/sports', { cache: 'force-cache' });
     const sports = await response.json();
     if (!response.ok || !Array.isArray(sports)) return;
-
     const current = liveEls.sport.value;
-    const active = sports
-      .filter(s => s && s.key && s.title)
-      .sort((a, b) => String(a.group || '').localeCompare(String(b.group || '')) || String(a.title).localeCompare(String(b.title)));
-
+    const active = sports.filter(s => s && s.key && s.title).sort((a, b) => String(a.group || '').localeCompare(String(b.group || '')) || String(a.title).localeCompare(String(b.title)));
     liveEls.sport.innerHTML = '<option value="">All Sports</option>' + active.map(s => `<option value="${esc(s.key)}">${esc(s.title)}${s.group ? ` — ${esc(s.group)}` : ''}</option>`).join('');
     if ([...liveEls.sport.options].some(o => o.value === current)) liveEls.sport.value = current;
   } catch (_) {}
@@ -309,11 +287,10 @@ async function scanLive() {
   const serial = ++requestSerial;
   if (activeController) activeController.abort();
   activeController = new AbortController();
-
   liveEls.scanBtn.disabled = true;
   liveEls.scanBtn.innerHTML = '<span class="spinner"></span> Scanning…';
-  liveEls.status.textContent = '● Scanning';
-  liveEls.message.textContent = 'Checking upcoming positive arbitrage opportunities…';
+  liveEls.status.textContent = '● Scanning pre-match only';
+  liveEls.message.textContent = 'Checking upcoming pre-match positive arbitrage opportunities…';
   liveEls.results.innerHTML = '<div class="loading-skeleton"><div></div><div></div><div></div></div>';
 
   const params = new URLSearchParams();
@@ -331,11 +308,10 @@ async function scanLive() {
       throw new Error(`${data.error || 'Live scan failed'}${detail ? ` — ${detail}` : ''}`);
     }
     if (serial !== requestSerial) return;
-
     latestEvents = Array.isArray(data) ? data.filter(isFutureEvent) : [];
     latestScanTime = new Date();
     renderLive(latestEvents, latestScanTime);
-    liveEls.status.textContent = '● Live · Future only';
+    liveEls.status.textContent = '● Live · Pre-match only';
   } catch (error) {
     if (error.name === 'AbortError') return;
     liveEls.message.textContent = error.message;
@@ -374,6 +350,5 @@ liveEls.stake.addEventListener('keydown', e => { if (e.key === 'Enter') scanLive
 liveEls.books.addEventListener('keydown', e => { if (e.key === 'Enter') renderCached(); });
 document.querySelectorAll('[data-book]').forEach(btn => btn.addEventListener('click', () => setBookPreset(btn.dataset.book)));
 
-// Even with auto-refresh off, remove any event as it approaches its start time.
 setInterval(renderCached, 30000);
 loadSportsCatalog();
