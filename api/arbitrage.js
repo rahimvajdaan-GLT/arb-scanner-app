@@ -31,7 +31,7 @@ function deriveOptimalStakes(selections) {
 
   if (usable.length < 2) return [];
   const inverseSum = usable.reduce((sum, sel) => sum + (1 / sel.price), 0);
-  if (!Number.isFinite(inverseSum) || inverseSum <= 0) return [];
+  if (!Number.isFinite(inverseSum) || inverseSum >= 1) return [];
 
   return usable.map(sel => ({
     ...sel,
@@ -40,7 +40,7 @@ function deriveOptimalStakes(selections) {
 }
 
 function normalizeHeadToHead(events) {
-  return events.map(event => ({
+  return (Array.isArray(events) ? events : []).map(event => ({
     ...event,
     raw_event_id: event.event_id || event.id || '',
     market_type: event.market_type || 'h2h',
@@ -48,10 +48,38 @@ function normalizeHeadToHead(events) {
   }));
 }
 
+function normalizeBestOdds(events) {
+  return (Array.isArray(events) ? events : []).map(event => {
+    const selections = (Array.isArray(event.selections) ? event.selections : []).map(sel => ({
+      name: sel.name,
+      point: sel.point,
+      best_price: Number(sel.best_price || sel.price || 0),
+      best_bookmaker: sel.best_bookmaker || sel.bookmaker || '',
+    }));
+    const arbPct = Number(event.arb_profit_pct || event.arb_pct || 0);
+    return {
+      event_id: event.id || event.event_id || '',
+      raw_event_id: event.id || event.event_id || '',
+      sport_key: event.sport_key,
+      home_team: event.home_team,
+      away_team: event.away_team,
+      commence_time: event.commence_time,
+      market_type: 'h2h',
+      source_type: 'best_odds',
+      is_arb: event.arb_exists === true || arbPct > 0,
+      arb_pct: Number.isFinite(arbPct) ? arbPct : 0,
+      stale: event.stale === true,
+      data_age_seconds: Number(event.data_age_seconds || 0),
+      freshest_age_seconds: Number(event.freshest_age_seconds || 0),
+      selections,
+      optimal_stakes: deriveOptimalStakes(selections),
+    };
+  });
+}
+
 function normalizeLineArbs(events, requestedMode) {
   const flattened = [];
-
-  events.forEach(event => {
+  (Array.isArray(events) ? events : []).forEach(event => {
     const marketType = String(event.market_type || '').toLowerCase();
     if (requestedMode === 'spreads' && marketType !== 'spreads') return;
     if (requestedMode === 'totals' && marketType !== 'totals') return;
@@ -71,7 +99,6 @@ function normalizeLineArbs(events, requestedMode) {
           String(side.name) === String(stake.name) &&
           (stake.point == null || side.point == null || Number(side.point) === Number(stake.point))
         ) || sides.find(side => String(side.name) === String(stake.name)) || {};
-
         return {
           ...stake,
           price: Number(matchingSide.price || stake.price || stake.odds || 0),
@@ -79,7 +106,6 @@ function normalizeLineArbs(events, requestedMode) {
           bookmaker: stake.bookmaker || matchingSide.bookmaker || '',
         };
       });
-
       if (!optimalStakes.length) optimalStakes = deriveOptimalStakes(selections);
 
       flattened.push({
@@ -95,29 +121,22 @@ function normalizeLineArbs(events, requestedMode) {
         state: opp.state ?? event.state,
         is_live: opp.is_live ?? event.is_live,
         in_play: opp.in_play ?? event.in_play,
-        is_inplay: opp.is_inplay ?? event.is_inplay,
         started: opp.started ?? event.started,
         completed: opp.completed ?? event.completed,
         is_arb: opp.is_arb === true,
         is_middle: opp.is_middle === true,
         arb_pct: Number(opp.arb_pct || 0),
-        max_overlay_pct: Number(opp.max_overlay_pct || 0),
         selections,
         optimal_stakes: optimalStakes,
       });
     });
   });
-
   return flattened;
 }
 
 function eventKey(event) {
-  return [
-    event.sport_key || '',
-    event.home_team || '',
-    event.away_team || '',
-    event.market_type || 'h2h',
-  ].join('|').toLowerCase();
+  return [event.sport_key || '', event.home_team || '', event.away_team || '', event.market_type || 'h2h']
+    .join('|').toLowerCase();
 }
 
 function uniqueEvents(events) {
@@ -135,133 +154,60 @@ function uniqueEvents(events) {
 function parseStartMs(value) {
   if (!value) return NaN;
   if (typeof value === 'number') return value > 1e12 ? value : value * 1000;
-
   const raw = String(value).trim();
   if (!raw) return NaN;
-
   const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw);
   return Date.parse(hasZone ? raw : `${raw}Z`);
 }
 
 function isInPlayOrStarted(event) {
   if (!event) return true;
-
-  const liveFlags = [
-    event.is_live,
-    event.live,
-    event.in_play,
-    event.inplay,
-    event.is_inplay,
-    event.started,
-    event.has_started,
-    event.completed,
-  ];
-  if (liveFlags.some(value => value === true || value === 1 || String(value).toLowerCase() === 'true')) return true;
-
-  const statusText = [
-    event.status,
-    event.state,
-    event.match_status,
-    event.event_status,
-    event.phase,
-    event.market_status,
-  ].filter(Boolean).join(' ').toLowerCase();
-
+  const flags = [event.is_live, event.live, event.in_play, event.inplay, event.is_inplay, event.started, event.has_started, event.completed];
+  if (flags.some(value => value === true || value === 1 || String(value).toLowerCase() === 'true')) return true;
+  const statusText = [event.status, event.state, event.match_status, event.event_status, event.phase, event.market_status]
+    .filter(Boolean).join(' ').toLowerCase();
   return /(in[-_ ]?play|live|started|playing|ongoing|half[-_ ]?time|halftime|finished|completed|ended)/i.test(statusText);
 }
 
-function isFuturePositiveArb(event, minProfitPct = 0) {
+function isValidPrematchPositiveArb(event) {
   if (!event || event.is_arb !== true || isInPlayOrStarted(event)) return false;
-
   const profitPct = Number(event.arb_pct || event.arb_profit_pct || 0);
-  if (!Number.isFinite(profitPct) || profitPct <= Math.max(0, minProfitPct)) return false;
-
+  if (!Number.isFinite(profitPct) || profitPct <= 0) return false;
+  if (event.stale === true) return false;
   const startMs = parseStartMs(event.commence_time);
   if (!Number.isFinite(startMs)) return false;
-
-  return startMs > Date.now() + 10 * 60_000;
+  // Keep a 20-minute safety window so borderline or delayed fixtures never appear as pre-match.
+  return startMs > Date.now() + 20 * 60_000;
 }
 
-function normalizeName(value) {
-  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+async function loadSports(apiKey) {
+  const sports = await readArray('https://api.puntersedge.online/v1/sports', apiKey);
+  return sports.filter(s => s && s.key && s.active !== false);
 }
 
-function teamTokens(value) {
-  const stop = new Set(['fc', 'club', 'the', 'united', 'city', 'team']);
-  return normalizeName(value).split(' ').filter(token => token && !stop.has(token));
-}
-
-function similarTeam(a, b) {
-  const na = normalizeName(a);
-  const nb = normalizeName(b);
-  if (!na || !nb) return false;
-  if (na === nb || na.includes(nb) || nb.includes(na)) return true;
-
-  const ta = teamTokens(a);
-  const tb = teamTokens(b);
-  if (!ta.length || !tb.length) return false;
-  const common = ta.filter(token => tb.includes(token)).length;
-  return common / Math.min(ta.length, tb.length) >= 0.5;
-}
-
-function sameFixture(candidate, rawEvent) {
-  const candidateId = String(candidate.raw_event_id || candidate.event_id || '');
-  const rawId = String(rawEvent.id || rawEvent.event_id || '');
-  if (candidateId && rawId && candidateId === rawId) return true;
-
-  const cStart = parseStartMs(candidate.commence_time);
-  const rStart = parseStartMs(rawEvent.commence_time);
-  const closeTime = Number.isFinite(cStart) && Number.isFinite(rStart) && Math.abs(cStart - rStart) <= 60 * 60_000;
-  const sameTeams = similarTeam(candidate.home_team, rawEvent.home_team) && similarTeam(candidate.away_team, rawEvent.away_team);
-
-  return closeTime && sameTeams;
-}
-
-function rawEventHasFreshMarket(rawEvent, marketType) {
-  const books = Array.isArray(rawEvent.bookmakers) ? rawEvent.bookmakers : [];
-  return books.some(book => {
-    const age = Number(book.age_seconds);
-    if (book.stale === true) return false;
-    if (Number.isFinite(age) && age > 360 * 60) return false;
-    const markets = Array.isArray(book.markets) ? book.markets : [];
-    return markets.some(market => String(market.key || '').toLowerCase() === marketType);
-  });
-}
-
-async function verifyAgainstPrematchFeed(candidates, apiKey) {
-  if (!candidates.length) return [];
-
-  const grouped = new Map();
-  for (const candidate of candidates) {
-    const sport = String(candidate.sport_key || '').trim();
-    const market = String(candidate.market_type || 'h2h').toLowerCase();
-    if (!sport || !['h2h', 'spreads', 'totals'].includes(market)) continue;
-    if (!grouped.has(sport)) grouped.set(sport, new Set());
-    grouped.get(sport).add(market);
+async function findBestOddsArbs(apiKey, sportKey, target = 10) {
+  let sportKeys = [];
+  if (sportKey) {
+    sportKeys = [sportKey];
+  } else {
+    const sports = await loadSports(apiKey);
+    const active = sports.map(s => String(s.key));
+    const preferred = ['nba', 'nrl', 'afl', 'soccer_epl', 'tennis_atp', 'tennis_wta', 'ncaab', 'ncaaf', 'cricket', 'soccer_uefa_champs_league'];
+    sportKeys = [...preferred.filter(key => active.includes(key)), ...active.filter(key => !preferred.includes(key))].slice(0, 10);
   }
 
-  const verifiedBySport = new Map();
-  await Promise.all([...grouped.entries()].map(async ([sport, marketSet]) => {
-    const markets = [...marketSet].join(',');
-    const url = `https://api.puntersedge.online/v1/sports/${encodeURIComponent(sport)}/odds?markets=${encodeURIComponent(markets)}&oddsFormat=decimal&maxAgeMinutes=360`;
-    try {
-      const events = await readArray(url, apiKey);
-      verifiedBySport.set(sport, events);
-    } catch (error) {
-      verifiedBySport.set(sport, []);
-    }
+  const groups = await Promise.allSettled(sportKeys.map(async key => {
+    const events = await readArray(`https://api.puntersedge.online/v1/best-odds/${encodeURIComponent(key)}`, apiKey);
+    return normalizeBestOdds(events);
   }));
 
-  return candidates.filter(candidate => {
-    const sportEvents = verifiedBySport.get(String(candidate.sport_key || '').trim()) || [];
-    const rawEvent = sportEvents.find(raw => sameFixture(candidate, raw));
-    if (!rawEvent) return false;
+  const all = groups
+    .filter(result => result.status === 'fulfilled')
+    .flatMap(result => result.value)
+    .filter(isValidPrematchPositiveArb)
+    .sort((a, b) => Number(b.arb_pct || 0) - Number(a.arb_pct || 0));
 
-    const rawStart = parseStartMs(rawEvent.commence_time);
-    if (!Number.isFinite(rawStart) || rawStart <= Date.now() + 10 * 60_000) return false;
-    if (rawEvent.stale === true) return false;
-    return rawEventHasFreshMarket(rawEvent, String(candidate.market_type || 'h2h').toLowerCase());
-  });
+  return uniqueEvents(all).slice(0, target);
 }
 
 export default async function handler(req, res) {
@@ -271,52 +217,48 @@ export default async function handler(req, res) {
   }
 
   const apiKey = process.env.PUNTERSEDGE_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: 'PUNTERSEDGE_API_KEY is not configured on the server.' });
-  }
+  if (!apiKey) return res.status(500).json({ error: 'PUNTERSEDGE_API_KEY is not configured on the server.' });
 
   const sportKey = typeof req.query.sport_key === 'string' ? req.query.sport_key.trim() : '';
-  const minProfitRaw = typeof req.query.min_profit_pct === 'string' ? req.query.min_profit_pct.trim() : '0';
-  const minProfit = Number(minProfitRaw);
-  const effectiveMinProfit = Number.isFinite(minProfit) ? Math.max(0, minProfit) : 0;
   const modeRaw = typeof req.query.market_mode === 'string' ? req.query.market_mode.trim().toLowerCase() : 'all';
   const allowedModes = new Set(['all', 'h2h', 'lines', 'spreads', 'totals']);
   const marketMode = allowedModes.has(modeRaw) ? modeRaw : 'all';
-
-  const params = new URLSearchParams({ min_profit_pct: String(effectiveMinProfit), maxAgeMinutes: '360' });
+  const params = new URLSearchParams({ min_profit_pct: '0', maxAgeMinutes: '360' });
   if (sportKey) params.set('sport_key', sportKey);
 
   try {
     const requests = [];
-
     if (marketMode === 'all' || marketMode === 'h2h') {
-      requests.push(
-        readArray(`https://api.puntersedge.online/v1/arb/sports?${params.toString()}`, apiKey)
-          .then(normalizeHeadToHead)
-      );
+      requests.push(readArray(`https://api.puntersedge.online/v1/arb/sports?${params.toString()}`, apiKey).then(normalizeHeadToHead));
     }
-
     if (marketMode === 'all' || marketMode === 'lines' || marketMode === 'spreads' || marketMode === 'totals') {
-      requests.push(
-        readArray(`https://api.puntersedge.online/v1/arb/lines?${params.toString()}`, apiKey)
-          .then(events => normalizeLineArbs(events, marketMode))
-      );
+      requests.push(readArray(`https://api.puntersedge.online/v1/arb/lines?${params.toString()}`, apiKey).then(events => normalizeLineArbs(events, marketMode)));
     }
 
-    const groups = await Promise.all(requests);
-    let combined = uniqueEvents(groups.flat().filter(Boolean))
-      .filter(event => isFuturePositiveArb(event, effectiveMinProfit));
+    const groups = await Promise.allSettled(requests);
+    let combined = groups
+      .filter(result => result.status === 'fulfilled')
+      .flatMap(result => result.value)
+      .filter(isValidPrematchPositiveArb);
 
-    combined = await verifyAgainstPrematchFeed(combined, apiKey);
+    // When the global arb endpoints return no genuine positive h2h arb, scan the provider's
+    // best-odds endpoint across active sports. This still returns only real positive arbs;
+    // it does not fill the board with value/negative opportunities.
+    if (combined.length < 10 && (marketMode === 'all' || marketMode === 'h2h')) {
+      const fallback = await findBestOddsArbs(apiKey, sportKey, 10);
+      combined = uniqueEvents([...combined, ...fallback]);
+    }
 
-    combined.sort((a, b) => {
-      const timeDiff = parseStartMs(a.commence_time) - parseStartMs(b.commence_time);
-      if (timeDiff !== 0) return timeDiff;
-      return Number(b.arb_pct || 0) - Number(a.arb_pct || 0);
-    });
+    combined = combined
+      .filter(isValidPrematchPositiveArb)
+      .sort((a, b) => {
+        const roiDiff = Number(b.arb_pct || 0) - Number(a.arb_pct || 0);
+        if (roiDiff !== 0) return roiDiff;
+        return parseStartMs(a.commence_time) - parseStartMs(b.commence_time);
+      });
 
     res.setHeader('Cache-Control', 'no-store, max-age=0');
-    return res.status(200).json(combined);
+    return res.status(200).json(combined.slice(0, 25));
   } catch (error) {
     return res.status(error.status || 500).json({
       error: error.message || 'Unable to reach PuntersEdge',
