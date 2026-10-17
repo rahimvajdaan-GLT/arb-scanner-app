@@ -266,9 +266,13 @@ function renderCached() {
 
 function updateScanCost() {
   const mode = liveEls.market.value;
-  liveEls.scanCostText.textContent = mode === 'all'
-    ? 'All Markets · 6 API credits'
-    : `${marketLabel(mode)} · 3 API credits`;
+  if (mode === 'all') {
+    liveEls.scanCostText.textContent = 'Top 10 mode · 6 credits + best-odds fallback if needed';
+  } else if (mode === 'h2h') {
+    liveEls.scanCostText.textContent = 'Moneyline · 3 credits + best-odds fallback if needed';
+  } else {
+    liveEls.scanCostText.textContent = `${marketLabel(mode)} · 3 API credits`;
+  }
 }
 
 async function loadSportsCatalog() {
@@ -300,7 +304,7 @@ async function scanLive() {
   liveEls.scanBtn.disabled = true;
   liveEls.scanBtn.innerHTML = '<span class="spinner"></span> Building Top 10 board…';
   liveEls.status.textContent = '● Scanning live odds';
-  liveEls.message.textContent = 'Checking true arbitrage first, then strongest value comparisons…';
+  liveEls.message.textContent = 'Checking true arbitrage first, then filling the board with best-odds events…';
   liveEls.results.innerHTML = '<div class="loading-skeleton"><div></div><div></div><div></div></div>';
 
   const params = new URLSearchParams();
