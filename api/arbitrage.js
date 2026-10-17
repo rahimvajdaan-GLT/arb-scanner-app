@@ -1,4 +1,4 @@
-async function readUpstream(url, apiKey) {
+async function readPayload(url, apiKey) {
   const upstream = await fetch(url, { headers: { 'X-API-Key': apiKey } });
   const contentType = upstream.headers.get('content-type') || '';
   const payload = contentType.includes('application/json')
@@ -11,15 +11,68 @@ async function readUpstream(url, apiKey) {
     error.detail = payload?.detail || payload;
     throw error;
   }
+  return payload;
+}
+
+async function readArray(url, apiKey) {
+  const payload = await readPayload(url, apiKey);
   return Array.isArray(payload) ? payload : [];
+}
+
+function deriveOptimalStakes(selections) {
+  const usable = (Array.isArray(selections) ? selections : [])
+    .map(sel => ({
+      name: sel.name,
+      point: sel.point,
+      price: Number(sel.best_price || sel.price || sel.odds || 0),
+      bookmaker: sel.best_bookmaker || sel.bookmaker || '',
+    }))
+    .filter(sel => sel.name && Number.isFinite(sel.price) && sel.price > 1);
+
+  if (usable.length < 2) return [];
+  const inverseSum = usable.reduce((sum, sel) => sum + (1 / sel.price), 0);
+  if (!Number.isFinite(inverseSum) || inverseSum <= 0) return [];
+
+  return usable.map(sel => ({
+    ...sel,
+    stake: ((1 / sel.price) / inverseSum) * 100,
+  }));
 }
 
 function normalizeHeadToHead(events) {
   return events.map(event => ({
     ...event,
     market_type: event.market_type || 'h2h',
-    source_type: 'h2h',
+    source_type: 'arb_sports',
   }));
+}
+
+function normalizeBestOdds(events) {
+  return events.map(event => {
+    const selections = (Array.isArray(event.selections) ? event.selections : []).map(sel => ({
+      name: sel.name,
+      point: sel.point,
+      best_price: Number(sel.best_price || sel.price || 0),
+      best_bookmaker: sel.best_bookmaker || sel.bookmaker || '',
+    }));
+
+    const arbPct = Number(event.arb_profit_pct || event.arb_pct || 0);
+    return {
+      event_id: event.id || event.event_id,
+      sport_key: event.sport_key,
+      home_team: event.home_team,
+      away_team: event.away_team,
+      commence_time: event.commence_time,
+      market_type: 'h2h',
+      source_type: 'best_odds',
+      is_arb: event.arb_exists === true || arbPct > 0,
+      is_middle: false,
+      arb_pct: Number.isFinite(arbPct) ? arbPct : 0,
+      max_overlay_pct: Number(event.max_overlay_pct || 0),
+      selections,
+      optimal_stakes: deriveOptimalStakes(selections),
+    };
+  }).filter(event => event.selections.length >= 2);
 }
 
 function normalizeLineArbs(events, requestedMode) {
@@ -40,7 +93,7 @@ function normalizeLineArbs(events, requestedMode) {
         best_bookmaker: side.bookmaker || '',
       }));
 
-      const optimalStakes = (Array.isArray(opp.optimal_stakes) ? opp.optimal_stakes : []).map(stake => {
+      let optimalStakes = (Array.isArray(opp.optimal_stakes) ? opp.optimal_stakes : []).map(stake => {
         const matchingSide = sides.find(side =>
           String(side.name) === String(stake.name) &&
           (stake.point == null || side.point == null || Number(side.point) === Number(stake.point))
@@ -54,6 +107,8 @@ function normalizeLineArbs(events, requestedMode) {
         };
       });
 
+      if (!optimalStakes.length) optimalStakes = deriveOptimalStakes(selections);
+
       flattened.push({
         event_id: `${event.event_id || 'line'}-${marketType}-${index}`,
         sport_key: event.sport_key,
@@ -61,7 +116,7 @@ function normalizeLineArbs(events, requestedMode) {
         away_team: event.away_team,
         commence_time: event.commence_time,
         market_type: marketType || 'lines',
-        source_type: 'lines',
+        source_type: 'arb_lines',
         is_arb: opp.is_arb === true,
         is_middle: opp.is_middle === true,
         arb_pct: Number(opp.arb_pct || 0),
@@ -73,6 +128,66 @@ function normalizeLineArbs(events, requestedMode) {
   });
 
   return flattened;
+}
+
+function eventKey(event) {
+  return [
+    event.sport_key || '',
+    event.home_team || '',
+    event.away_team || '',
+    event.market_type || 'h2h',
+  ].join('|').toLowerCase();
+}
+
+function uniqueEvents(events) {
+  const seen = new Set();
+  const output = [];
+  for (const event of events) {
+    const key = eventKey(event);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    output.push(event);
+  }
+  return output;
+}
+
+async function loadSports(apiKey) {
+  const sports = await readArray('https://api.puntersedge.online/v1/sports', apiKey);
+  return sports.filter(s => s && s.key && s.active !== false);
+}
+
+async function addBestOddsFallback(existing, apiKey, sportKey, targetCount = 12) {
+  let combined = uniqueEvents(existing);
+  if (combined.length >= targetCount) return combined;
+
+  let sportKeys = [];
+  if (sportKey) {
+    sportKeys = [sportKey];
+  } else {
+    const sports = await loadSports(apiKey);
+    const preferred = ['nba', 'nrl', 'afl', 'soccer_epl', 'tennis_atp', 'tennis_wta', 'ncaab', 'ncaaf'];
+    const activeKeys = sports.map(s => String(s.key));
+    sportKeys = [
+      ...preferred.filter(key => activeKeys.includes(key)),
+      ...activeKeys.filter(key => !preferred.includes(key)),
+    ];
+  }
+
+  // Fetch one sport at a time and stop as soon as the board has enough events.
+  // This avoids spending credits on sports we do not need.
+  for (const key of sportKeys.slice(0, 8)) {
+    if (combined.length >= targetCount) break;
+    try {
+      const events = await readArray(`https://api.puntersedge.online/v1/best-odds/${encodeURIComponent(key)}`, apiKey);
+      combined = uniqueEvents([...combined, ...normalizeBestOdds(events)]);
+    } catch (error) {
+      // A sport may have no current prices or may be unsupported by best-odds.
+      // Skip it instead of failing the whole scan.
+      if (![404, 422].includes(error.status)) throw error;
+    }
+  }
+
+  return combined;
 }
 
 export default async function handler(req, res) {
@@ -97,25 +212,31 @@ export default async function handler(req, res) {
 
   try {
     const requests = [];
+
     if (marketMode === 'all' || marketMode === 'h2h') {
       requests.push(
-        readUpstream(`https://api.puntersedge.online/v1/arb/sports?${params.toString()}`, apiKey)
+        readArray(`https://api.puntersedge.online/v1/arb/sports?${params.toString()}`, apiKey)
           .then(normalizeHeadToHead)
       );
     }
 
     if (marketMode === 'all' || marketMode === 'lines' || marketMode === 'spreads' || marketMode === 'totals') {
       requests.push(
-        readUpstream(`https://api.puntersedge.online/v1/arb/lines?${params.toString()}`, apiKey)
+        readArray(`https://api.puntersedge.online/v1/arb/lines?${params.toString()}`, apiKey)
           .then(events => normalizeLineArbs(events, marketMode))
       );
     }
 
     const groups = await Promise.all(requests);
-    const combined = groups.flat().filter(Boolean);
+    let combined = uniqueEvents(groups.flat().filter(Boolean));
 
-    // Return true arbitrage first, then the strongest non-arb/value comparisons.
-    // The frontend labels non-arb rows clearly as NOT GUARANTEED.
+    // The arb endpoints can legitimately return only a couple of candidates.
+    // Fill the board with canonical best-odds events so the UI can still show a useful Top 10.
+    // These fallback rows are clearly labelled NOT GUARANTEED in the frontend.
+    if (combined.length < 10 && (marketMode === 'all' || marketMode === 'h2h')) {
+      combined = await addBestOddsFallback(combined, apiKey, sportKey, 12);
+    }
+
     combined.sort((a, b) => {
       if (Boolean(a.is_arb) !== Boolean(b.is_arb)) return a.is_arb ? -1 : 1;
       const aScore = Number(a.arb_pct || a.max_overlay_pct || 0);
