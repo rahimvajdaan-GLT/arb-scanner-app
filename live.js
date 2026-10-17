@@ -2,7 +2,6 @@ const liveEls = {
   scanBtn: document.getElementById('scanLiveBtn'),
   sport: document.getElementById('liveSport'),
   market: document.getElementById('liveMarket'),
-  minProfit: document.getElementById('liveMinProfit'),
   stake: document.getElementById('liveStake'),
   books: document.getElementById('liveBooks'),
   autoRefresh: document.getElementById('autoRefresh'),
@@ -21,6 +20,7 @@ let refreshTimer = null;
 let latestEvents = [];
 let activeController = null;
 let requestSerial = 0;
+let latestScanTime = null;
 
 function money(value) {
   const n = Number(value);
@@ -134,38 +134,26 @@ function bookmakerMatches(plan) {
   return wanted.some(w => books.some(b => b.includes(w)));
 }
 
-function valueScore(item) {
-  const overlay = Number(item.event.max_overlay_pct || 0);
-  if (Number.isFinite(overlay) && overlay > 0) return 100 + overlay;
-  return item.plan.roi;
+function isFutureEvent(event) {
+  if (!event.commence_time) return false;
+  const start = new Date(event.commence_time).getTime();
+  return Number.isFinite(start) && start > Date.now();
 }
 
 function buildBoard(events) {
   const totalStake = clampNumber(liveEls.stake.value, 1000, 1, 10000000);
-  const minRoi = clampNumber(liveEls.minProfit.value, 0.1, 0, 50);
   liveEls.stake.value = String(totalStake);
-  liveEls.minProfit.value = String(minRoi);
 
-  const prepared = events
+  const trueArbs = events
     .filter(Boolean)
+    .filter(isFutureEvent)
     .map(event => ({ event, plan: calculateRoundedPlan(event, totalStake) }))
     .filter(item => item.plan)
-    .filter(item => bookmakerMatches(item.plan));
-
-  const trueArbs = prepared
-    .filter(item => item.event.is_arb === true && item.plan.roi >= minRoi)
+    .filter(item => bookmakerMatches(item.plan))
+    .filter(item => item.event.is_arb === true && item.plan.profit > 0 && item.plan.roi > 0)
     .sort((a, b) => b.plan.roi - a.plan.roi);
 
-  const fallback = prepared
-    .filter(item => !(item.event.is_arb === true && item.plan.roi >= minRoi))
-    .sort((a, b) => valueScore(b) - valueScore(a));
-
-  const board = [...trueArbs];
-  for (const item of fallback) {
-    if (board.length >= DISPLAY_TARGET) break;
-    board.push(item);
-  }
-  return { board, trueArbs };
+  return { board: trueArbs.slice(0, DISPLAY_TARGET), trueArbs };
 }
 
 function updateMetrics(trueArbs, board, scanTime = new Date()) {
@@ -177,31 +165,28 @@ function updateMetrics(trueArbs, board, scanTime = new Date()) {
   liveEls.lastUpdated.textContent = `${scanTime.toLocaleTimeString()} · ${board.length} shown`;
 }
 
-function renderLive(events, scanTime = new Date()) {
+function renderLive(events, scanTime = latestScanTime || new Date()) {
   const totalStake = clampNumber(liveEls.stake.value, 1000, 1, 10000000);
   const { board, trueArbs } = buildBoard(events);
   liveEls.results.innerHTML = '';
   updateMetrics(trueArbs, board, scanTime);
 
   if (!board.length) {
-    liveEls.message.textContent = 'No opportunities match your current filters.';
-    liveEls.results.innerHTML = `<div class="no-results"><div class="no-results-icon">◎</div><div><strong>No opportunities right now</strong><span>Try All Sports, All Markets, 0.1% ROI, or clear the bookmaker filter.</span></div></div>`;
+    liveEls.message.textContent = 'No future positive arbitrage opportunities match your current filters.';
+    liveEls.results.innerHTML = `<div class="no-results"><div class="no-results-icon">◎</div><div><strong>No positive future arbs right now</strong><span>Try All Sports, All Markets, or clear the bookmaker filter.</span></div></div>`;
     return;
   }
 
-  const valueCount = Math.max(0, board.length - trueArbs.length);
-  liveEls.message.textContent = `${trueArbs.length} true arb${trueArbs.length === 1 ? '' : 's'} · ${valueCount} value comparison${valueCount === 1 ? '' : 's'} · ${board.length} shown`;
+  liveEls.message.textContent = `${trueArbs.length} future positive true arb${trueArbs.length === 1 ? '' : 's'} found · ${board.length} shown`;
 
   board.forEach(({ event, plan }, index) => {
-    const when = event.commence_time ? new Date(event.commence_time).toLocaleString() : 'Time unavailable';
+    const when = new Date(event.commence_time).toLocaleString('en-AU');
     const sourceRoi = Number(event.arb_pct || 0);
-    const sourceRoiText = Number.isFinite(sourceRoi) ? sourceRoi.toFixed(2) : '—';
+    const sourceRoiText = Number.isFinite(sourceRoi) && sourceRoi > 0 ? sourceRoi.toFixed(2) : null;
     const market = marketLabel(event.market_type);
-    const guaranteed = event.is_arb === true && plan.roi > 0;
-    const overlay = Number(event.max_overlay_pct || 0);
 
     const card = document.createElement('article');
-    card.className = `live-card ${guaranteed ? 'guaranteed-card' : 'value-card'}`;
+    card.className = 'live-card guaranteed-card';
     card.innerHTML = `
       <div class="live-card-head">
         <div class="event-title-wrap">
@@ -210,29 +195,26 @@ function renderLive(events, scanTime = new Date()) {
             <div class="event-meta">
               <span class="sport-chip">${esc(String(event.sport_key || 'SPORT').toUpperCase())}</span>
               <span class="market-chip">${esc(market)}</span>
-              ${guaranteed ? '<span class="guarantee-chip">TRUE ARB</span>' : '<span class="value-chip">VALUE</span>'}
-              ${event.is_middle ? '<span class="middle-chip">Middle</span>' : ''}
+              <span class="guarantee-chip">TRUE ARB</span>
               <span>${esc(when)}</span>
             </div>
             <h3>${esc(event.home_team || 'Home')} <span>vs</span> ${esc(event.away_team || 'Away')}</h3>
           </div>
         </div>
         <div class="roi-stack">
-          <div class="roi-badge ${guaranteed ? 'good' : 'neutral'}">${plan.roi >= 0 ? '+' : ''}${plan.roi.toFixed(2)}%</div>
-          <small>${guaranteed ? `feed ${sourceRoiText}%` : overlay > 0 ? `overlay ${overlay.toFixed(2)}%` : 'comparison'}</small>
+          <div class="roi-badge good">+${plan.roi.toFixed(2)}%</div>
+          <small>${sourceRoiText ? `feed ${sourceRoiText}%` : 'positive arb'}</small>
         </div>
       </div>
 
       <div class="live-summary">
         <div><span>Total Stake</span><strong>${money(totalStake)}</strong></div>
-        <div><span>${guaranteed ? 'Guaranteed Profit' : 'Balanced Result'}</span><strong class="${guaranteed ? 'profit-text' : ''}">${money(plan.profit)}</strong></div>
-        <div><span>${guaranteed ? 'Guaranteed Return' : 'Worst-case Return'}</span><strong>${money(plan.guaranteedReturn)}</strong></div>
+        <div><span>Guaranteed Profit</span><strong class="profit-text">${money(plan.profit)}</strong></div>
+        <div><span>Guaranteed Return</span><strong>${money(plan.guaranteedReturn)}</strong></div>
         <div><span>Market</span><strong>${esc(market)}</strong></div>
       </div>
 
-      ${guaranteed ? '' : '<div class="value-warning">Comparison only — not guaranteed profit.</div>'}
-
-      <div class="market-label">${guaranteed ? 'Stake Split' : 'Balanced Comparison'}</div>
+      <div class="market-label">Stake Split</div>
       <div class="stake-plan live-stakes">
         ${plan.scaled.map(s => {
           const payout = s.scaledStake * s.price;
@@ -245,7 +227,7 @@ function renderLive(events, scanTime = new Date()) {
 }
 
 function renderCached() {
-  if (latestEvents.length) renderLive(latestEvents, new Date());
+  if (latestEvents.length) renderLive(latestEvents, latestScanTime || new Date());
 }
 
 async function loadSportsCatalog() {
@@ -272,7 +254,7 @@ async function scanLive() {
   liveEls.scanBtn.disabled = true;
   liveEls.scanBtn.innerHTML = '<span class="spinner"></span> Scanning…';
   liveEls.status.textContent = '● Scanning';
-  liveEls.message.textContent = 'Checking the latest bookmaker prices…';
+  liveEls.message.textContent = 'Checking future positive arbitrage opportunities…';
   liveEls.results.innerHTML = '<div class="loading-skeleton"><div></div><div></div><div></div></div>';
 
   const params = new URLSearchParams();
@@ -283,7 +265,8 @@ async function scanLive() {
 
   try {
     const response = await fetch(`/api/arbitrage?${params.toString()}`, { cache: 'no-store', signal: activeController.signal });
-    const data = await response.json();
+    const contentType = response.headers.get('content-type') || '';
+    const data = contentType.includes('application/json') ? await response.json() : { error: await response.text() };
     if (!response.ok) {
       const detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail || '');
       throw new Error(`${data.error || 'Live scan failed'}${detail ? ` — ${detail}` : ''}`);
@@ -291,7 +274,8 @@ async function scanLive() {
     if (serial !== requestSerial) return;
 
     latestEvents = Array.isArray(data) ? data : [];
-    renderLive(latestEvents, new Date());
+    latestScanTime = new Date();
+    renderLive(latestEvents, latestScanTime);
     liveEls.status.textContent = '● Live';
   } catch (error) {
     if (error.name === 'AbortError') return;
@@ -315,12 +299,6 @@ function configureAutoRefresh() {
   }
 }
 
-function setRoiPreset(value) {
-  liveEls.minProfit.value = value;
-  document.querySelectorAll('[data-roi]').forEach(btn => btn.classList.toggle('active', btn.dataset.roi === String(value)));
-  renderCached();
-}
-
 function setBookPreset(value) {
   liveEls.books.value = value;
   document.querySelectorAll('[data-book]').forEach(btn => btn.classList.toggle('active', value && btn.dataset.book === value));
@@ -329,14 +307,12 @@ function setBookPreset(value) {
 
 liveEls.scanBtn.addEventListener('click', scanLive);
 liveEls.autoRefresh.addEventListener('change', configureAutoRefresh);
-liveEls.minProfit.addEventListener('input', renderCached);
 liveEls.stake.addEventListener('input', renderCached);
 liveEls.books.addEventListener('input', renderCached);
 liveEls.sport.addEventListener('change', scanLive);
 liveEls.market.addEventListener('change', scanLive);
 liveEls.stake.addEventListener('keydown', e => { if (e.key === 'Enter') scanLive(); });
 liveEls.books.addEventListener('keydown', e => { if (e.key === 'Enter') renderCached(); });
-document.querySelectorAll('[data-roi]').forEach(btn => btn.addEventListener('click', () => setRoiPreset(btn.dataset.roi)));
 document.querySelectorAll('[data-book]').forEach(btn => btn.addEventListener('click', () => setBookPreset(btn.dataset.book)));
 
 loadSportsCatalog();
