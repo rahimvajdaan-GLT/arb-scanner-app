@@ -12,12 +12,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Allow production deploy to settle
-        run: sleep 20
+        run: sleep 5
       - name: Probe EPL provider health
         run: |
           echo '=== EPL FEED HEALTH ==='
           curl -sS --fail-with-body 'https://arb-scanner-app.vercel.app/api/arbitrage?sport_key=soccer_epl&debug=1'
           echo
+      - name: Probe Bwin public sportsbook feed
+        run: |
+          echo '=== BWIN ==='
+          URL='https://www.bwin.com/cds-api/bettingoffer/fixtures?x-bwin-accessid=NTZiMjk3OGMtNjU5Mi00NjA5LWI2MWItZmU4MDRhN2QxZmEz&lang=en&country=GB&userCountry=GB&fixtureTypes=Standard&state=Latest&offerMapping=Filtered&offerCategories=Gridable&sportIds=4&skip=0&take=5&sortBy=Tags'
+          curl -L -sS -A 'Mozilla/5.0 Chrome/124 Safari/537.36' -o /tmp/bwin -w 'HTTP=%{http_code} TYPE=%{content_type} SIZE=%{size_download}\n' "$URL" || true
+          head -c 500 /tmp/bwin || true; echo
+      - name: Probe BetMGM Sports API
+        run: |
+          echo '=== BETMGM NO AUTH ==='
+          curl -L -sS -A 'Mozilla/5.0 Chrome/124 Safari/537.36' -o /tmp/mgm -w 'HTTP=%{http_code} TYPE=%{content_type} SIZE=%{size_download}\n' 'https://sportsapi.pa.betmgm.com/offer/api/US/sports?language=en' || true
+          head -c 500 /tmp/mgm || true; echo
+          echo '=== BETMGM WITH PUBLIC BWIN ACCESS ID ==='
+          curl -L -sS -A 'Mozilla/5.0 Chrome/124 Safari/537.36' -H 'Bwin-AccessId: NTZiMjk3OGMtNjU5Mi00NjA5LWI2MWItZmU4MDRhN2QxZmEz' -o /tmp/mgm2 -w 'HTTP=%{http_code} TYPE=%{content_type} SIZE=%{size_download}\n' 'https://sportsapi.pa.betmgm.com/offer/api/US/sports?language=en' || true
+          head -c 500 /tmp/mgm2 || true; echo
       - name: Probe live arb output
         run: |
           echo '=== ARBITRAGE OUTPUT ==='
