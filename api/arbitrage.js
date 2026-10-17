@@ -42,6 +42,7 @@ function deriveOptimalStakes(selections) {
 function normalizeHeadToHead(events) {
   return events.map(event => ({
     ...event,
+    raw_event_id: event.event_id || event.id || '',
     market_type: event.market_type || 'h2h',
     source_type: 'arb_sports',
   }));
@@ -83,6 +84,7 @@ function normalizeLineArbs(events, requestedMode) {
 
       flattened.push({
         event_id: `${event.event_id || 'line'}-${marketType}-${index}`,
+        raw_event_id: event.event_id || event.id || '',
         sport_key: event.sport_key,
         home_team: event.home_team,
         away_team: event.away_team,
@@ -177,9 +179,77 @@ function isFuturePositiveArb(event, minProfitPct = 0) {
   const startMs = parseStartMs(event.commence_time);
   if (!Number.isFinite(startMs)) return false;
 
-  // Strict pre-match only: hide anything starting within 10 minutes.
-  // This protects against feed delays, clock differences and stale in-play prices.
+  // Strict pre-match only. Anything inside 10 minutes of scheduled start is hidden.
   return startMs > Date.now() + 10 * 60_000;
+}
+
+function normalizeName(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function sameFixture(candidate, rawEvent) {
+  const candidateId = String(candidate.raw_event_id || candidate.event_id || '');
+  const rawId = String(rawEvent.id || rawEvent.event_id || '');
+  if (candidateId && rawId && candidateId === rawId) return true;
+
+  const cHome = normalizeName(candidate.home_team);
+  const cAway = normalizeName(candidate.away_team);
+  const rHome = normalizeName(rawEvent.home_team);
+  const rAway = normalizeName(rawEvent.away_team);
+  const cStart = parseStartMs(candidate.commence_time);
+  const rStart = parseStartMs(rawEvent.commence_time);
+  const closeTime = Number.isFinite(cStart) && Number.isFinite(rStart) && Math.abs(cStart - rStart) <= 15 * 60_000;
+
+  return closeTime && cHome && cAway && cHome === rHome && cAway === rAway;
+}
+
+function rawEventHasFreshMarket(rawEvent, marketType) {
+  const books = Array.isArray(rawEvent.bookmakers) ? rawEvent.bookmakers : [];
+  return books.some(book => {
+    const age = Number(book.age_seconds);
+    if (book.stale === true) return false;
+    if (Number.isFinite(age) && age > 15 * 60) return false;
+    const markets = Array.isArray(book.markets) ? book.markets : [];
+    return markets.some(market => String(market.key || '').toLowerCase() === marketType);
+  });
+}
+
+async function verifyAgainstPrematchFeed(candidates, apiKey) {
+  if (!candidates.length) return [];
+
+  const grouped = new Map();
+  for (const candidate of candidates) {
+    const sport = String(candidate.sport_key || '').trim();
+    const market = String(candidate.market_type || 'h2h').toLowerCase();
+    if (!sport || !['h2h', 'spreads', 'totals'].includes(market)) continue;
+    if (!grouped.has(sport)) grouped.set(sport, new Set());
+    grouped.get(sport).add(market);
+  }
+
+  const verifiedBySport = new Map();
+  await Promise.all([...grouped.entries()].map(async ([sport, marketSet]) => {
+    const markets = [...marketSet].join(',');
+    const url = `https://api.puntersedge.online/v1/sports/${encodeURIComponent(sport)}/odds?markets=${encodeURIComponent(markets)}&oddsFormat=decimal&maxAgeMinutes=15`;
+    try {
+      const events = await readArray(url, apiKey);
+      verifiedBySport.set(sport, events);
+    } catch (error) {
+      // Fail closed: if we cannot verify the event on the official pre-match endpoint,
+      // do not show it as a betting opportunity.
+      verifiedBySport.set(sport, []);
+    }
+  }));
+
+  return candidates.filter(candidate => {
+    const sportEvents = verifiedBySport.get(String(candidate.sport_key || '').trim()) || [];
+    const rawEvent = sportEvents.find(raw => sameFixture(candidate, raw));
+    if (!rawEvent) return false;
+
+    const rawStart = parseStartMs(rawEvent.commence_time);
+    if (!Number.isFinite(rawStart) || rawStart <= Date.now() + 10 * 60_000) return false;
+    if (rawEvent.stale === true) return false;
+    return rawEventHasFreshMarket(rawEvent, String(candidate.market_type || 'h2h').toLowerCase());
+  });
 }
 
 export default async function handler(req, res) {
@@ -201,7 +271,7 @@ export default async function handler(req, res) {
   const allowedModes = new Set(['all', 'h2h', 'lines', 'spreads', 'totals']);
   const marketMode = allowedModes.has(modeRaw) ? modeRaw : 'all';
 
-  const params = new URLSearchParams({ min_profit_pct: String(effectiveMinProfit) });
+  const params = new URLSearchParams({ min_profit_pct: String(effectiveMinProfit), maxAgeMinutes: '15' });
   if (sportKey) params.set('sport_key', sportKey);
 
   try {
@@ -222,13 +292,18 @@ export default async function handler(req, res) {
     }
 
     const groups = await Promise.all(requests);
-    const combined = uniqueEvents(groups.flat().filter(Boolean))
-      .filter(event => isFuturePositiveArb(event, effectiveMinProfit))
-      .sort((a, b) => {
-        const timeDiff = parseStartMs(a.commence_time) - parseStartMs(b.commence_time);
-        if (timeDiff !== 0) return timeDiff;
-        return Number(b.arb_pct || 0) - Number(a.arb_pct || 0);
-      });
+    let combined = uniqueEvents(groups.flat().filter(Boolean))
+      .filter(event => isFuturePositiveArb(event, effectiveMinProfit));
+
+    // Final safety gate: an opportunity is shown only if the exact fixture still exists
+    // on PuntersEdge's current pre-match-only odds endpoint with a fresh matching market.
+    combined = await verifyAgainstPrematchFeed(combined, apiKey);
+
+    combined.sort((a, b) => {
+      const timeDiff = parseStartMs(a.commence_time) - parseStartMs(b.commence_time);
+      if (timeDiff !== 0) return timeDiff;
+      return Number(b.arb_pct || 0) - Number(a.arb_pct || 0);
+    });
 
     res.setHeader('Cache-Control', 'no-store, max-age=0');
     return res.status(200).json(combined);
