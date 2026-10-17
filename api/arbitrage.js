@@ -47,34 +47,6 @@ function normalizeHeadToHead(events) {
   }));
 }
 
-function normalizeBestOdds(events) {
-  return events.map(event => {
-    const selections = (Array.isArray(event.selections) ? event.selections : []).map(sel => ({
-      name: sel.name,
-      point: sel.point,
-      best_price: Number(sel.best_price || sel.price || 0),
-      best_bookmaker: sel.best_bookmaker || sel.bookmaker || '',
-    }));
-
-    const arbPct = Number(event.arb_profit_pct || event.arb_pct || 0);
-    return {
-      event_id: event.id || event.event_id,
-      sport_key: event.sport_key,
-      home_team: event.home_team,
-      away_team: event.away_team,
-      commence_time: event.commence_time,
-      market_type: 'h2h',
-      source_type: 'best_odds',
-      is_arb: event.arb_exists === true || arbPct > 0,
-      is_middle: false,
-      arb_pct: Number.isFinite(arbPct) ? arbPct : 0,
-      max_overlay_pct: Number(event.max_overlay_pct || 0),
-      selections,
-      optimal_stakes: deriveOptimalStakes(selections),
-    };
-  }).filter(event => event.selections.length >= 2);
-}
-
 function normalizeLineArbs(events, requestedMode) {
   const flattened = [];
 
@@ -151,43 +123,18 @@ function uniqueEvents(events) {
   return output;
 }
 
-async function loadSports(apiKey) {
-  const sports = await readArray('https://api.puntersedge.online/v1/sports', apiKey);
-  return sports.filter(s => s && s.key && s.active !== false);
-}
+function isFuturePositiveArb(event, minProfitPct = 0) {
+  if (!event || event.is_arb !== true) return false;
 
-async function addBestOddsFallback(existing, apiKey, sportKey, targetCount = 12) {
-  let combined = uniqueEvents(existing);
-  if (combined.length >= targetCount) return combined;
+  const profitPct = Number(event.arb_pct || event.arb_profit_pct || 0);
+  if (!Number.isFinite(profitPct) || profitPct <= Math.max(0, minProfitPct)) return false;
 
-  let sportKeys = [];
-  if (sportKey) {
-    sportKeys = [sportKey];
-  } else {
-    const sports = await loadSports(apiKey);
-    const preferred = ['nba', 'nrl', 'afl', 'soccer_epl', 'tennis_atp', 'tennis_wta', 'ncaab', 'ncaaf'];
-    const activeKeys = sports.map(s => String(s.key));
-    sportKeys = [
-      ...preferred.filter(key => activeKeys.includes(key)),
-      ...activeKeys.filter(key => !preferred.includes(key)),
-    ];
-  }
+  if (!event.commence_time) return false;
+  const startMs = Date.parse(event.commence_time);
+  if (!Number.isFinite(startMs)) return false;
 
-  // Fetch one sport at a time and stop as soon as the board has enough events.
-  // This avoids spending credits on sports we do not need.
-  for (const key of sportKeys.slice(0, 8)) {
-    if (combined.length >= targetCount) break;
-    try {
-      const events = await readArray(`https://api.puntersedge.online/v1/best-odds/${encodeURIComponent(key)}`, apiKey);
-      combined = uniqueEvents([...combined, ...normalizeBestOdds(events)]);
-    } catch (error) {
-      // A sport may have no current prices or may be unsupported by best-odds.
-      // Skip it instead of failing the whole scan.
-      if (![404, 422].includes(error.status)) throw error;
-    }
-  }
-
-  return combined;
+  // Do not show games that have already started. A 60-second buffer avoids borderline stale events.
+  return startMs > Date.now() + 60_000;
 }
 
 export default async function handler(req, res) {
@@ -202,12 +149,14 @@ export default async function handler(req, res) {
   }
 
   const sportKey = typeof req.query.sport_key === 'string' ? req.query.sport_key.trim() : '';
-  const minProfit = typeof req.query.min_profit_pct === 'string' ? req.query.min_profit_pct.trim() : '0';
+  const minProfitRaw = typeof req.query.min_profit_pct === 'string' ? req.query.min_profit_pct.trim() : '0';
+  const minProfit = Number(minProfitRaw);
+  const effectiveMinProfit = Number.isFinite(minProfit) ? Math.max(0, minProfit) : 0;
   const modeRaw = typeof req.query.market_mode === 'string' ? req.query.market_mode.trim().toLowerCase() : 'all';
   const allowedModes = new Set(['all', 'h2h', 'lines', 'spreads', 'totals']);
   const marketMode = allowedModes.has(modeRaw) ? modeRaw : 'all';
 
-  const params = new URLSearchParams({ min_profit_pct: minProfit || '0' });
+  const params = new URLSearchParams({ min_profit_pct: String(effectiveMinProfit) });
   if (sportKey) params.set('sport_key', sportKey);
 
   try {
@@ -228,23 +177,11 @@ export default async function handler(req, res) {
     }
 
     const groups = await Promise.all(requests);
-    let combined = uniqueEvents(groups.flat().filter(Boolean));
+    const combined = uniqueEvents(groups.flat().filter(Boolean))
+      .filter(event => isFuturePositiveArb(event, effectiveMinProfit))
+      .sort((a, b) => Number(b.arb_pct || 0) - Number(a.arb_pct || 0));
 
-    // The arb endpoints can legitimately return only a couple of candidates.
-    // Fill the board with canonical best-odds events so the UI can still show a useful Top 10.
-    // These fallback rows are clearly labelled NOT GUARANTEED in the frontend.
-    if (combined.length < 10 && (marketMode === 'all' || marketMode === 'h2h')) {
-      combined = await addBestOddsFallback(combined, apiKey, sportKey, 12);
-    }
-
-    combined.sort((a, b) => {
-      if (Boolean(a.is_arb) !== Boolean(b.is_arb)) return a.is_arb ? -1 : 1;
-      const aScore = Number(a.arb_pct || a.max_overlay_pct || 0);
-      const bScore = Number(b.arb_pct || b.max_overlay_pct || 0);
-      return bScore - aScore;
-    });
-
-    res.setHeader('Cache-Control', 's-maxage=20, stale-while-revalidate=40');
+    res.setHeader('Cache-Control', 's-maxage=15, stale-while-revalidate=30');
     return res.status(200).json(combined);
   } catch (error) {
     return res.status(error.status || 500).json({
