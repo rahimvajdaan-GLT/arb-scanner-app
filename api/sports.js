@@ -15,7 +15,7 @@ export default async function handler(req, res) {
     res.setHeader('Allow', 'GET');
     return res.status(405).json({ error: 'Method not allowed' });
   }
-  res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400');
-  res.setHeader('X-Odds-Engine', 'open-multibook-v5');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.setHeader('X-Odds-Engine', 'open-multibook-v6');
   return res.status(200).json(SPORTS);
 }
