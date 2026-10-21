@@ -1,6 +1,6 @@
-const ENGINE='au-openbooks-v16-syntax-repair';
+const ENGINE='au-openbooks-v17-broad-fixtures';
 const FUTURE_BUFFER_MS=10*60*1000;
-const MATCH_WINDOW_MS=4*60*60*1000;
+const MATCH_WINDOW_MS=90*60*1000;
 const BASE_HEADERS={
   'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36',
   'Accept':'application/json, text/plain, */*',
@@ -130,10 +130,10 @@ async function entainBook(host,book,anchors,sport){
       if(e?.match_status&&e.match_status!=='BettingOpen')continue;
       const ta=teams(e?.name||e?.display_name);if(!ta)continue;
       const time=entainEventTime(e);const candidate={sport:meta.key,home:ta.home,away:ta.away,time};
-      if(anchors.some(a=>sameFixture(a,candidate)))listed.push({meta,e,ta,time,id:String(e?.id??e?.event_id??e?.eventId??'')});
+      if(time&&parseMs(time)>Date.now()+FUTURE_BUFFER_MS)listed.push({meta,e,ta,time,id:String(e?.id??e?.event_id??e?.eventId??'')});
     }
   }
-  const dedup=[...new Map(listed.filter(x=>x.id).map(x=>[x.id,x])).values()].slice(0,18);
+  const dedup=[...new Map(listed.filter(x=>x.id).map(x=>[x.id,x])).values()].sort((a,b)=>parseMs(a.time)-parseMs(b.time)).slice(0,45);
   const cards=await Promise.allSettled(dedup.map(x=>getJson(`https://${host}/v2/sport/event-card?id=${encodeURIComponent(x.id)}`,headers,16000).then(card=>({x,card}))));
   const events=[];let cardFailures=0;
   for(const r of cards){
@@ -177,7 +177,7 @@ export default async function handler(req,res){
 
   let neds={events:[],listed:0,cards:0,cardFailures:0,categoryErrors:[]};
   let lads={events:[],listed:0,cards:0,cardFailures:0,categoryErrors:[]};
-  if(pe.length){
+  {
     const [nr,lr]=await Promise.allSettled([
       entainBook('api.neds.com.au','Neds',pe,sport),
       entainBook('api.ladbrokes.com.au','Ladbrokes AU',pe,sport)
@@ -195,6 +195,6 @@ export default async function handler(req,res){
   const arbs=cross.map(arb).filter(Boolean).sort((a,b)=>b.arb_pct-a.arb_pct).slice(0,25);
 
   res.setHeader('Cache-Control','no-store, max-age=0');
-  if(debug)return res.status(200).json({engine:ENGINE,providers,merged_games:buckets.length,cross_book_games:cross.length,arbs:arbs.length,results:arbs});
+  if(debug)return res.status(200).json({engine:ENGINE,providers,merged_games:buckets.length,cross_book_games:cross.length,arbs:arbs.length,results:arbs,scan_scope:'Independent pre-match Neds and Ladbrokes discovery, plus PointsBet'});
   return res.status(200).json(arbs);
 }
