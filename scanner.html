@@ -32,9 +32,26 @@ window.addEventListener('load',()=>{const b=document.getElementById('scanLiveBtn
     if(p.error)message+=' | ERROR: '+String(p.error).slice(0,350);
     lines.push(message);
    }
-   if(!providers.some(p=>Number(p.events)>0))lines.push('No bookmaker is returning usable upcoming odds. This is a feed issue, not proof of zero arbitrage.');
-   else if(!data.cross_book_games)lines.push('No identical fixtures with valid odds from 2+ bookmakers. More working sources are required.');
-   else if(!data.arbs)lines.push('Books overlap, but no positive mathematical arbitrage was calculated.');
+   const healthy=providers.filter(p=>Number(p.events)>0);
+   const message=document.getElementById('liveMessage');
+   const empty=document.querySelector('#liveResults .no-results strong');
+   const detail=document.querySelector('#liveResults .no-results span');
+   if(!healthy.length){
+     lines.push('Feed unavailable: no bookmaker returned usable future odds. Do not interpret this as zero market opportunities.');
+     if(message)message.textContent='Odds feeds unavailable — unable to verify profitable opportunities.';
+     if(empty)empty.textContent='Live odds currently unavailable';
+     if(detail)detail.textContent='Bookmaker responses are missing or blocked. Try later; no profit claim can be made.';
+   }else if(!data.cross_book_games){
+     lines.push('Only '+healthy.length+' feed(s) returned data; no verified same-fixture cross-book comparison is available.');
+     if(message)message.textContent='No cross-book comparison available from the current feeds.';
+     if(empty)empty.textContent='Not enough comparable bookmaker prices';
+     if(detail)detail.textContent='The scanner received fixtures but could not compare matching markets across at least two working bookmakers.';
+   }else if(!data.arbs){
+     lines.push('Matched markets were checked, but no positive quoted-odds arbitrage was calculated.');
+     if(message)message.textContent='Checked '+data.cross_book_games+' cross-book matches; no positive arbitrage verified.';
+     if(empty)empty.textContent='No verified positive arbitrage at this scan';
+     if(detail)detail.textContent='Matching bookmaker prices were checked. Prices may change; this does not mean there are no upcoming games.';
+   }
   }catch(e){if(id!==serial)return;lines.push('Live diagnostic failed: '+String(e?.message||e));}
   diag.style.display='block';diag.replaceChildren();
   const heading=document.createElement('strong');heading.textContent='Feed diagnostic';diag.append(heading);
