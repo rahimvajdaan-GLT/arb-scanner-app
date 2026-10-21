@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v17-broad-fixtures';
+const ENGINE='au-openbooks-v18-market-integrity';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=90*60*1000;
 const BASE_HEADERS={
@@ -50,7 +50,7 @@ function eventObj(sport,h,a,time,book,sels,source){
   const best=new Map();
   for(const s of sels||[]){const o=dec(s.odds),r=s.role||role(s.name,h,a,s.homeAway);if(r&&o&&(!best.has(r)||o>best.get(r).odds))best.set(r,{market:'h2h',role:r,odds:o,point:null,book})}
   if(best.size<2)return null;
-  return{sport,home:h,away:a,time:iso,book,offers:[...best.values()],source};
+  return{sport,home:h,away:a,time:iso,book,offers:[...best.values()],outcomeCount:best.size,source};
 }
 
 async function pointsBet(){
@@ -133,7 +133,7 @@ async function entainBook(host,book,anchors,sport){
       if(time&&parseMs(time)>Date.now()+FUTURE_BUFFER_MS)listed.push({meta,e,ta,time,id:String(e?.id??e?.event_id??e?.eventId??'')});
     }
   }
-  const dedup=[...new Map(listed.filter(x=>x.id).map(x=>[x.id,x])).values()].sort((a,b)=>parseMs(a.time)-parseMs(b.time)).slice(0,45);
+  const dedup=[...new Map(listed.filter(x=>x.id).map(x=>[x.id,x])).values()].sort((a,b)=>parseMs(a.time)-parseMs(b.time)).slice(0,65);
   const cards=await Promise.allSettled(dedup.map(x=>getJson(`https://${host}/v2/sport/event-card?id=${encodeURIComponent(x.id)}`,headers,16000).then(card=>({x,card}))));
   const events=[];let cardFailures=0;
   for(const r of cards){
@@ -147,16 +147,22 @@ function merge(events){
   const buckets=[];
   for(const e of events){
     const t=parseMs(e.time);let b=buckets.find(x=>x.sport===e.sport&&Math.abs(parseMs(x.time)-t)<=MATCH_WINDOW_MS&&((same(x.home,e.home)&&same(x.away,e.away))||(same(x.home,e.away)&&same(x.away,e.home))));
-    if(!b){b={sport:e.sport,home:e.home,away:e.away,time:e.time,offers:[],books:new Set()};buckets.push(b)}
-    b.books.add(e.book);const rev=same(e.home,b.away)&&same(e.away,b.home);
+    if(!b){b={sport:e.sport,home:e.home,away:e.away,time:e.time,offers:[],books:new Set(),outcomeCounts:new Map()};buckets.push(b)}
+    b.books.add(e.book);b.outcomeCounts.set(e.book,e.outcomeCount);const rev=same(e.home,b.away)&&same(e.away,b.home);
     for(const o of e.offers){let r=o.role;if(rev&&(r==='home'||r==='away'))r=r==='home'?'away':'home';b.offers.push({...o,role:r})
     }
   }
   return buckets;
 }
 function arb(b){
-  if(b.books.size<2)return null;const best={};for(const o of b.offers)if(!best[o.role]||o.odds>best[o.role].odds)best[o.role]=o;
-  const roles=b.offers.some(o=>o.role==='draw')?['home','draw','away']:['home','away'];if(roles.some(r=>!best[r]))return null;
+  if(b.books.size<2)return null;
+  // Two-way and three-way match-winner markets have different settlement rules.
+  // Never combine them into a synthetic arbitrage.
+  const counts=[...b.outcomeCounts.values()];
+  if(counts.some(c=>c!==counts[0]))return null;
+  const roles=counts[0]===3?['home','draw','away']:['home','away'];
+  const compatible=b.offers.filter(o=>b.outcomeCounts.get(o.book)===roles.length);
+  const best={};for(const o of compatible)if(!best[o.role]||o.odds>best[o.role].odds)best[o.role]=o;if(roles.some(r=>!best[r]))return null;
   const sels=roles.map(r=>({name:r==='home'?b.home:r==='away'?b.away:'Draw',point:null,best_price:Number(best[r].odds),best_bookmaker:best[r].book}));
   if(new Set(sels.map(x=>x.best_bookmaker)).size<2)return null;
   const inv=sels.reduce((s,x)=>s+1/x.best_price,0);if(!Number.isFinite(inv)||inv>=1)return null;const roi=(1/inv-1)*100;
