@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v15-stable';
+const ENGINE='au-openbooks-v16-syntax-repair';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=4*60*60*1000;
 const BASE_HEADERS={
@@ -150,6 +150,7 @@ function merge(events){
     if(!b){b={sport:e.sport,home:e.home,away:e.away,time:e.time,offers:[],books:new Set()};buckets.push(b)}
     b.books.add(e.book);const rev=same(e.home,b.away)&&same(e.away,b.home);
     for(const o of e.offers){let r=o.role;if(rev&&(r==='home'||r==='away'))r=r==='home'?'away':'home';b.offers.push({...o,role:r})
+    }
   }
   return buckets;
 }
