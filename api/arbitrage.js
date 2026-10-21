@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v18-market-integrity';
+const ENGINE='au-openbooks-v19-rate-control';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=90*60*1000;
 const BASE_HEADERS={
@@ -21,11 +21,20 @@ const ALIASES=new Map([
   ['soccer_epl','soccer'],['americanfootball_nfl','nfl'],['tennis_atp','tennis'],['tennis_wta','tennis']
 ]);
 
+const hostCooldown=new Map();
+const scanCache=new Map();
 async function getJson(url,extra={},timeout=15000){
+  const host=new URL(url).hostname;
+  if((hostCooldown.get(host)||0)>Date.now())throw new Error('HTTP 429 '+host+' (cooldown active; requests paused)');
   const c=new AbortController(); const timer=setTimeout(()=>c.abort(),timeout);
   try{
     const r=await fetch(url,{headers:{...BASE_HEADERS,...extra},signal:c.signal,redirect:'follow',cache:'no-store'});
     const text=await r.text();
+    if(r.status===429){
+      const retry=Number(r.headers.get('retry-after'));
+      hostCooldown.set(host,Date.now()+(Number.isFinite(retry)&&retry>0?Math.min(retry*1000,3600000):15*60*1000));
+      throw new Error('HTTP 429 '+host+' (rate-limited; retry later)');
+    }
     if(!r.ok) throw new Error(`HTTP ${r.status} ${new URL(url).hostname}${text?`: ${text.slice(0,160)}`:''}`);
     try{return JSON.parse(text)}catch{throw new Error(`Invalid JSON from ${new URL(url).hostname}`)}
   } finally { clearTimeout(timer); }
@@ -118,13 +127,22 @@ async function entainBook(host,book,anchors,sport){
   const metas=sport?ENTAIN_CATEGORIES.filter(x=>x.key===sport):ENTAIN_CATEGORIES;
   const headers={'Content-Type':'application/json','Origin':book==='Neds'?'https://www.neds.com.au':'https://www.ladbrokes.com.au','Referer':book==='Neds'?'https://www.neds.com.au/':'https://www.ladbrokes.com.au/'};
   const listed=[];const categoryErrors=[];
-  const lists=await Promise.allSettled(metas.map(async meta=>{
-    const qs=new URLSearchParams({category_ids:JSON.stringify([meta.id])});
-    const data=await getJson(`https://${host}/v2/sport/event-request?${qs.toString()}`,headers,15000);
-    return{meta,events:entainListEvents(data)};
-  }));
+  // Use a small, sequential discovery batch to avoid request bursts.
+  const selected=metas.slice(0,3);
+  const lists=[];
+  for(const meta of selected){
+    try{
+      const qs=new URLSearchParams({category_ids:JSON.stringify([meta.id])});
+      const data=await getJson(`https://${host}/v2/sport/event-request?${qs.toString()}`,headers,15000);
+      lists.push({status:'fulfilled',value:{meta,events:entainListEvents(data)}});
+    }catch(e){
+      lists.push({status:'rejected',reason:e});
+      if(/HTTP 429/.test(String(e?.message||e)))break;
+    }
+  }
   for(let i=0;i<lists.length;i++){
-    const r=lists[i],meta=metas[i];
+
+    const r=lists[i],meta=selected[i];
     if(r.status==='rejected'){categoryErrors.push(`${meta.key}: ${String(r.reason?.message||r.reason).slice(0,120)}`);continue}
     for(const e of r.value.events){
       if(e?.match_status&&e.match_status!=='BettingOpen')continue;
@@ -133,8 +151,17 @@ async function entainBook(host,book,anchors,sport){
       if(time&&parseMs(time)>Date.now()+FUTURE_BUFFER_MS)listed.push({meta,e,ta,time,id:String(e?.id??e?.event_id??e?.eventId??'')});
     }
   }
-  const dedup=[...new Map(listed.filter(x=>x.id).map(x=>[x.id,x])).values()].sort((a,b)=>parseMs(a.time)-parseMs(b.time)).slice(0,65);
-  const cards=await Promise.allSettled(dedup.map(x=>getJson(`https://${host}/v2/sport/event-card?id=${encodeURIComponent(x.id)}`,headers,16000).then(card=>({x,card}))));
+  const dedup=[...new Map(listed.filter(x=>x.id).map(x=>[x.id,x])).values()].sort((a,b)=>parseMs(a.time)-parseMs(b.time)).slice(0,8);
+  const cards=[];
+  for(const x of dedup){
+    try{
+      const card=await getJson(`https://${host}/v2/sport/event-card?id=${encodeURIComponent(x.id)}`,headers,16000);
+      cards.push({status:'fulfilled',value:{x,card}});
+    }catch(e){
+      cards.push({status:'rejected',reason:e});
+      if(/HTTP 429/.test(String(e?.message||e)))break;
+    }
+  }
   const events=[];let cardFailures=0;
   for(const r of cards){
     if(r.status==='rejected'){cardFailures++;continue}
@@ -169,13 +196,7 @@ function arb(b){
   return{event_id:`${b.sport}-${norm(b.home).replace(/\s/g,'')}-${norm(b.away).replace(/\s/g,'')}-${Math.round(parseMs(b.time)/60000)}`,sport_key:b.sport,home_team:b.home,away_team:b.away,commence_time:b.time,market_type:'h2h',source_type:ENGINE,is_arb:true,arb_pct:Number(roi.toFixed(3)),selections:sels,optimal_stakes:sels.map(x=>({name:x.name,point:null,price:x.best_price,bookmaker:x.best_bookmaker,stake:((1/x.best_price)/inv)*100}))};
 }
 
-export default async function handler(req,res){
-  if(req.method!=='GET'){res.setHeader('Allow','GET');return res.status(405).json({error:'Method not allowed'})}
-  const raw=typeof req.query.sport_key==='string'?req.query.sport_key.trim().toLowerCase():'';
-  const sport=ALIASES.get(raw)||raw;const mode=String(req.query.market_mode||'all').toLowerCase();const debug=String(req.query.debug||'')==='1';
-  if(!['all','h2h','lines','spreads','totals'].includes(mode))return res.status(400).json({error:'Unsupported market_mode'});
-  if(!['all','h2h'].includes(mode)&&!debug)return res.status(200).json([]);
-
+async function scan(sport){
   const providers=[];
   let pe=[];
   try{pe=await pointsBet();providers.push({provider:'PointsBet AU',ok:true,events:pe.length})}
@@ -200,7 +221,25 @@ export default async function handler(req,res){
   const cross=buckets.filter(b=>b.books.size>=2);
   const arbs=cross.map(arb).filter(Boolean).sort((a,b)=>b.arb_pct-a.arb_pct).slice(0,25);
 
-  res.setHeader('Cache-Control','no-store, max-age=0');
-  if(debug)return res.status(200).json({engine:ENGINE,providers,merged_games:buckets.length,cross_book_games:cross.length,arbs:arbs.length,results:arbs,scan_scope:'Independent pre-match Neds and Ladbrokes discovery, plus PointsBet'});
-  return res.status(200).json(arbs);
+  return {engine:ENGINE,providers,merged_games:buckets.length,cross_book_games:cross.length,arbs:arbs.length,results:arbs,scan_scope:'Limited requests with cooldown on provider rate limits'};
+}
+export default async function handler(req,res){
+  if(req.method!=='GET'){res.setHeader('Allow','GET');return res.status(405).json({error:'Method not allowed'})}
+  const raw=typeof req.query.sport_key==='string'?req.query.sport_key.trim().toLowerCase():'';
+  const sport=ALIASES.get(raw)||raw,mode=String(req.query.market_mode||'all').toLowerCase(),debug=String(req.query.debug||'')==='1';
+  if(!['all','h2h','lines','spreads','totals'].includes(mode))return res.status(400).json({error:'Unsupported market_mode'});
+  if(!['all','h2h'].includes(mode)&&!debug)return res.status(200).json([]);
+  const key=sport||'all';let item=scanCache.get(key);
+  if(!item||item.expires<Date.now()){
+    item={expires:Date.now()+90*1000,promise:scan(sport)};
+    scanCache.set(key,item);
+  }
+  try{
+    const data=await item.promise;
+    res.setHeader('Cache-Control','private, max-age=30, stale-while-revalidate=30');
+    return res.status(200).json(debug?data:data.results);
+  }catch(e){
+    scanCache.delete(key);
+    return res.status(503).json({error:'Odds sources temporarily unavailable',detail:String(e?.message||e).slice(0,180)});
+  }
 }
