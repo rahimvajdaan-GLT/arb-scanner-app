@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en-AU"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Australian Bookmaker Connections | Top Notch Arb</title>
+<meta name="description" content="Explore ten Australian bookmaker sources and see which odds feeds are integrated, limited or awaiting connection to Top Notch Arb.">
+<link rel="canonical" href="https://arb-scanner-app.vercel.app/bookmakers.html">
+<link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/bright.css"><link rel="stylesheet" href="/site.css">
+<style>
+:root{color-scheme:light}body{background:#f4f7fc;color:#18253b;font-family:Inter,system-ui,sans-serif}
+.book-wrap{max-width:1180px;margin:auto;padding:44px 22px 80px}
+.book-hero{padding:36px;border:1px solid #dce5f2;border-radius:24px;background:linear-gradient(115deg,#fff 50%,#e9efff);box-shadow:0 12px 40px #20365a0a}
+.book-hero h1{font-size:clamp(30px,4vw,48px);line-height:1.1;letter-spacing:-.04em;margin:12px 0}
+.book-hero p{max-width:760px;line-height:1.7;color:#62718a}
+.book-tag{font-size:12px;letter-spacing:.13em;font-weight:800;color:#5d59c8;text-transform:uppercase}
+.book-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:24px}
+.book-stat{padding:20px;background:white;border:1px solid #dfe7f2;border-radius:16px}
+.book-stat strong{display:block;font-size:30px;color:#172b50}.book-stat span{display:block;color:#65748c;font-size:13px;margin-top:4px}
+.book-section-title{margin:36px 0 16px;font-size:22px;letter-spacing:-.025em}
+.book-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.book-card{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:23px;border-radius:18px;border:1px solid #e1e8f4;background:white;box-shadow:0 7px 25px #24385508}
+.book-card h2{font-size:17px;margin:0 0 7px}.book-card p{color:#65748c;font-size:13px;line-height:1.6;margin:0}
+.book-state{white-space:nowrap;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:800;background:#f0f3f9;color:#60708d}
+.book-state.integrated{background:#e8f7ef;color:#147d50}.book-state.limited{background:#fff2dd;color:#976011}
+.book-note{padding:22px;margin-top:24px;background:#eaf1ff;border-radius:16px;color:#405b7e;font-size:14px;line-height:1.7}
+.book-cta{display:inline-block;margin-top:20px;background:linear-gradient(120deg,#347cff,#7b4cff);border-radius:13px;padding:13px 19px;color:white!important;font-weight:800;text-decoration:none}
+.book-footer{color:#71809b;font-size:12px;text-align:center;margin-top:40px}
+@media(max-width:720px){.book-hero{padding:23px}.book-grid{grid-template-columns:1fr}.book-summary{grid-template-columns:1fr}.book-card{flex-direction:column}.book-wrap{padding:22px 14px 50px}}
+</style></head><body>
+<header class="site-header"><nav class="site-nav"><a class="site-brand" href="/"><span class="site-logo">TNA</span><span>Top Notch Arb</span></a><div class="nav-links"><a href="/scanner.html">Scanner</a><a href="/bookmakers.html" aria-current="page">Bookmakers</a><a href="/how-it-works.html">How it works</a><a href="/responsible-gambling.html">Responsible use</a></div><div class="nav-actions"><a class="btn btn-secondary" href="/login.html">Log in</a></div></nav></header>
+<main class="book-wrap">
+<section class="book-hero"><div class="book-tag">Australian market coverage</div><h1>Bookmaker connections</h1><p>We're building wider odds coverage so Top Notch Arb can compare more upcoming fixtures. The labels below describe <strong>integration status</strong>, not proof that live odds are currently available. Unconnected bookmakers never contribute fabricated odds or profit figures.</p><a class="book-cta" href="/scanner.html">Open live scanner →</a></section>
+<div class="book-summary"><div class="book-stat"><strong>10</strong><span>Bookmakers on the roadmap</span></div><div class="book-stat"><strong>3</strong><span>Feed integrations attempted</span></div><div class="book-stat"><strong>7</strong><span>Additional connections planned</span></div></div>
+<h2 class="book-section-title">Current integrations</h2>
+<div class="book-grid">
+<article class="book-card"><div><h2>PointsBet AU</h2><p>Integrated into the current match-winner scanner. Availability varies by fixture and server response.</p></div><span class="book-state integrated">Integrated</span></article>
+<article class="book-card"><div><h2>Neds</h2><p>Feed integrated, but requests have returned HTTP 429 rate limits. Odds cannot be assumed available.</p></div><span class="book-state limited">Rate-limited</span></article>
+<article class="book-card"><div><h2>Ladbrokes AU</h2><p>Feed integrated, but requests have returned HTTP 429 rate limits. Odds cannot be assumed available.</p></div><span class="book-state limited">Rate-limited</span></article>
+</div>
+<h2 class="book-section-title">Planned connections</h2>
+<div class="book-grid">
+<article class="book-card"><div><h2>Sportsbet</h2><p>Planned. Earlier direct requests were access-denied; an authorized feed is needed.</p></div><span class="book-state">Not connected</span></article>
+<article class="book-card"><div><h2>TAB</h2><p>Planned. Current scanner does not receive verified TAB odds.</p></div><span class="book-state">Not connected</span></article>
+<article class="book-card"><div><h2>bet365 Australia</h2><p>Planned. Australian market data connection has not been configured.</p></div><span class="book-state">Not connected</span></article>
+<article class="book-card"><div><h2>Unibet Australia</h2><p>Planned. Bookmaker prices are not included in current calculations.</p></div><span class="book-state">Not connected</span></article>
+<article class="book-card"><div><h2>Betfair Exchange</h2><p>Planned. Official API access and commission-adjusted calculations are required.</p></div><span class="book-state">Not connected</span></article>
+<article class="book-card"><div><h2>TABtouch</h2><p>Planned. A compliant, reliable odds feed is needed before inclusion.</p></div><span class="book-state">Not connected</span></article>
+<article class="book-card"><div><h2>Bet Right</h2><p>Planned. No verified active feed is connected to the scanner.</p></div><span class="book-state">Not connected</span></article>
+</div>
+<div class="book-note"><strong>How to interpret profit signals:</strong> Only real pre-match prices from available feeds can be used. A positive inverse-odds calculation is a theoretical quoted-odds opportunity—not a guarantee of profit after timing, fees, betting limits, cancellations, and settlement rules. A missing feed is not the same as no opportunities.</div>
+<div class="book-footer">Top Notch Arb · Australian bookmaker comparison roadmap</div>
+</main></body></html>
