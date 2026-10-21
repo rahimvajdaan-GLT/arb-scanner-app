@@ -28,3 +28,29 @@
 @media(max-width:1250px){.live-controls{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:900px){.live-controls{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:680px){.live-controls{grid-template-columns:1fr}.legend-inline{width:100%;justify-content:flex-start}.live-card{padding:15px}.event-meta{gap:6px}.bet-instruction-row{align-items:flex-start;gap:10px}.bet-instruction-row .stake-right{text-align:left}}
+
+/* Top Notch Arb premium scanner refresh */
+.scanner-shell{background:radial-gradient(circle at 88% 2%,rgba(108,93,255,.10),transparent 36%),#f5f7fc}
+.scanner-shell .main{max-width:1560px}
+.scanner-shell .topbar{padding:12px 0 4px}
+.scanner-shell .topbar h1{font-size:clamp(30px,3.5vw,47px);letter-spacing:-.045em}
+.scanner-shell .metric-card{border-radius:18px;box-shadow:0 8px 28px rgba(28,48,88,.055)}
+.scanner-shell .metric-card strong{font-size:clamp(22px,2.1vw,30px);letter-spacing:-.035em}
+.scanner-shell .scanner-card{box-shadow:0 18px 55px rgba(29,50,92,.075);border-radius:22px}
+.scanner-shell .scan-btn{background:linear-gradient(110deg,#306dff,#7950f4 65%,#a500e8);border:0;box-shadow:0 12px 25px rgba(93,73,233,.22);transition:transform .18s,box-shadow .18s}
+.scanner-shell .scan-btn:hover{transform:translateY(-2px);box-shadow:0 17px 32px rgba(93,73,233,.27)}
+.scanner-shell .form-grid input,.scanner-shell .form-grid select{border-radius:12px}
+.scanner-shell .chip-btn{font-size:12px;min-height:36px;padding:0 14px}
+.scanner-shell .live-card{border-radius:20px;border:1px solid #dbe5f3;background:white;box-shadow:0 10px 32px rgba(25,47,93,.06)}
+.scanner-shell .guaranteed-card{border-left:4px solid #13af7b}
+.scanner-shell .bet-help{background:#ecf9f3;border-color:#c5ebda;font-size:13px}
+.scanner-shell .live-card-head h3{font-size:clamp(18px,2vw,23px)}
+.scanner-shell .roi-badge.good{font-size:18px}
+.scanner-shell #feedDiagnostics{font-family:Inter,system-ui,sans-serif!important;background:#f8fbff!important;border-color:#d9e5f4!important;line-height:1.8!important}
+.scanner-shell #feedDiagnostics strong{display:block;font-size:15px;margin-bottom:4px}
+.scanner-shell .no-results{padding:24px;align-items:flex-start;border-radius:16px;background:#f7faff;border:1px dashed #d4e1f3}
+.scanner-shell .no-results strong{font-size:15px}
+.scanner-shell .no-results span{font-size:12px;line-height:1.65}
+.scanner-shell .event-start-time{display:block;margin-top:6px;color:#7a879c}
+.scanner-shell .result-toolbar{margin-top:3px}
+@media(max-width:680px){.scanner-shell .scanner-card{border-radius:16px}.scanner-shell .no-results{padding:15px}.scanner-shell .metric-card strong{font-size:23px}}
