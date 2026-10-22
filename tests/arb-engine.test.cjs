@@ -189,3 +189,12 @@ test('extra feed only runs on user opt-in; auto refresh cannot drain free quota'
  assert.match(front,/liveEls.extraFeed\.checked\) liveEls.autoRefresh.checked = false/);
  assert.match(page,/live\.js\?v=41/);
 });
+
+test('exclude exchange prices until commission and liquidity are modeled',()=>{
+ const t=new Date(Date.now()+24*3600000).toISOString();
+ const c=new Date().toISOString();
+ const make=book=>({bookmaker:book,home:'Lakers',away:'Celtics',start_time:t,captured_at:c,markets:[{key:'h2h',name:'Match Betting',selections:[{name:'Lakers',price:2.3},{name:'Celtics',price:2.3}]}]});
+ const values=E.krokEvents({data:[make('Betfair Exchange'),make('Sportsbet')]},'basketball');
+ assert.equal(values.events.length,1);
+ assert.equal(values.events[0].book,'Sportsbet');
+});
