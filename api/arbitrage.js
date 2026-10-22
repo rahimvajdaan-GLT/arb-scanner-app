@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v35-settlement-safe';
+const ENGINE='au-openbooks-v36-parser-diagnostics';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=30*60*1000;
 const BASE_HEADERS={
@@ -247,11 +247,17 @@ async function entainBook(host,book,anchors,sport){
     };
   }
   const events=[];let cardFailures=0;
+  const parser_stats={cards_fetched:0,no_accepted_match_market:0,invalid_fixture_after_parsing:0,accepted:0};
   for(const r of cards){
     if(r.status==='rejected'){cardFailures++;continue}
-    const{x,card}=r.value;const sels=entainCardSelections(card,x.ta.home,x.ta.away,x.meta.key);const item=eventObj(x.meta.key,x.ta.home,x.ta.away,x.time,book,sels,book.toLowerCase());if(item)events.push(item);
+    parser_stats.cards_fetched++;
+    const{x,card}=r.value;const sels=entainCardSelections(card,x.ta.home,x.ta.away,x.meta.key);
+    if(sels.length<2){parser_stats.no_accepted_match_market++;continue}
+    const item=eventObj(x.meta.key,x.ta.home,x.ta.away,x.time,book,sels,book.toLowerCase());
+    if(item){events.push(item);parser_stats.accepted++}
+    else parser_stats.invalid_fixture_after_parsing++;
   }
-  return{events,listed:listed.length,cards:cards.length,cardFailures,categoryErrors,categories:selected.map(x=>x.key),schema_sample};
+  return{events,listed:listed.length,cards:cards.length,cardFailures,parser_stats,categoryErrors,categories:selected.map(x=>x.key),schema_sample};
 }
 
 function merge(events){
@@ -413,7 +419,7 @@ async function scan(sport){
   for(const [name,result,values] of [['Neds',nr,neds],['Ladbrokes AU',lr,lads]]){
     if(result.status==='fulfilled')providers.push({
       provider:name,ok:!values.categoryErrors?.length,events:values.events.length,
-      listed:values.listed,cards:values.cards,card_failures:values.cardFailures,
+      listed:values.listed,cards:values.cards,card_failures:values.cardFailures,parser_stats:values.parser_stats,
       categories:values.categories||[],schema_sample:values.schema_sample,
       error:values.categoryErrors?.length?values.categoryErrors.join(' | '):undefined
     });
