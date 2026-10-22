@@ -21,6 +21,14 @@ window.addEventListener('load',()=>{const b=document.getElementById('scanLiveBtn
    if(id!==serial)return;
    lines.push('Engine: '+(data.engine||'unknown'));
    lines.push('Games parsed: '+(data.merged_games??0)+' | Cross-book matches: '+(data.cross_book_games??0)+' | True positive arbs: '+(data.arbs??0));
+   if(data.validation_reasons){
+     const reasons=data.validation_reasons;
+     lines.push('Market validation: '+(reasons.comparable||0)+' comparable | '+(reasons.mixed_outcome_counts||0)+' incompatible 2-way/3-way | '+(reasons.incomplete_outcomes||0)+' incomplete | '+(reasons.invalid_prices||0)+' invalid prices');
+     for(const example of (data.rejected_examples||[])){
+       const breakdown=(example.outcomes||[]).map(v=>v.book+': '+v.count+' outcomes').join(' vs ');
+       lines.push('Excluded: '+example.fixture+' — '+example.reason+' ('+breakdown+')');
+     }
+   }
    if(Array.isArray(data.closest_markets)){
      lines.push('Compatible markets checked: '+(data.comparable_markets??0));
      for(const m of data.closest_markets.slice(0,3)){
