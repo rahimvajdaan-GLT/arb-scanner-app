@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v26-sockodds-safe';
+const ENGINE='au-openbooks-v27-comparison-board';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=90*60*1000;
 const BASE_HEADERS={
@@ -327,7 +327,7 @@ async function scan(sport){
     if(reason!=='comparable'&&rejectedExamples.length<3)rejectedExamples.push({fixture:b.home+' vs '+b.away,reason,books:[...b.books],outcomes:[...b.outcomeCounts].map(([book,count])=>({book,count}))});
   }
   const audited=cross.map(priceAudit).filter(Boolean).sort((a,b)=>b.roi_pct-a.roi_pct);
-  return {engine:ENGINE,providers,merged_games:buckets.length,cross_book_games:cross.length,comparable_markets:audited.length,validation_reasons:auditReasons,rejected_examples:rejectedExamples,closest_markets:audited.slice(0,5),arbs:arbs.length,results:arbs,scan_scope:'Limited requests with cooldown on provider rate limits'};
+  return {engine:ENGINE,providers,merged_games:buckets.length,cross_book_games:cross.length,comparable_markets:audited.length,validation_reasons:auditReasons,rejected_examples:rejectedExamples,closest_markets:audited.slice(0,5),comparisons:audited.slice(0,35),arbs:arbs.length,results:arbs,scan_scope:'Limited requests with cooldown on provider rate limits'};
 }
 export default async function handler(req,res){
   if(req.method!=='GET'){res.setHeader('Allow','GET');return res.status(405).json({error:'Method not allowed'})}
