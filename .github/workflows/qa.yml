@@ -1,0 +1,28 @@
+name: Top Notch Arb QA
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression-and-site-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out website
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate API and client JavaScript syntax
+        run: |
+          node --check live.js
+          node --check tests/arb-engine.test.cjs
+          node --check tests/site-integrity.test.cjs
+      - name: Run independent bookmaker, calculation and website tests
+        run: node --test tests/*.test.cjs
