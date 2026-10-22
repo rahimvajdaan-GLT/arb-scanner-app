@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v40-optional-multibook';
+const ENGINE='au-openbooks-v41-third-provider';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=30*60*1000;
 const BASE_HEADERS={
@@ -419,20 +419,24 @@ async function sockOdds(){
     const events=[];let rawEvents=0;const observed=new Set();
     try{
       // Use the previously verified query; league-filtered requests returned HTTP 403.
-      const params=new URLSearchParams({markets:'winner',regions:'au',group_by:'bookmaker',limit:'20',starts_after:new Date().toISOString()});
+      const params=new URLSearchParams({markets:'winner',regions:'au',group_by:'bookmaker',limit:'5',starts_after:new Date().toISOString()});
       const c=new AbortController(),timer=setTimeout(()=>c.abort(),13000);
       let r;
       try{r=await fetch('https://api.sockodds.com/v1/odds?'+params,{headers:{Authorization:'Bearer '+key,Accept:'application/json'},signal:c.signal})}
       finally{clearTimeout(timer)}
       if(r.status===429){
         const rawRetry=r.headers.get('retry-after');
+        let errorBody={};try{errorBody=await r.json()}catch{}
+        const explanation=String(errorBody.title||'')+' '+String(errorBody.detail||'');
+        const monthly=/monthly allowance|monthly quota|monthly limit|objects for this month/i.test(explanation);
         const seconds=rawRetry==null?NaN:Number(rawRetry);
         const target=Number.isFinite(seconds)&&seconds>0?Date.now()+seconds*1000:Date.parse(rawRetry||'');
         const hasRetry=Number.isFinite(target)&&target>Date.now();
-        // A 429 alone does not tell us whether the minute or monthly quota is exhausted.
-        const pauseUntil=hasRetry?Math.min(target,Date.now()+6*60*60*1000):Date.now()+6*60*60*1000;
+        const now=new Date(),monthlyReset=Date.UTC(now.getUTCFullYear(),now.getUTCMonth()+1,1,0,0,10);
+        // SockOdds documents that 429 without Retry-After usually means monthly quota.
+        const pauseUntil=monthly?monthlyReset:hasRetry?Math.min(target,Date.now()+6*60*60*1000):Date.now()+6*60*60*1000;
         sockCache.until=pauseUntil;
-        const reason=hasRetry?'SockOdds rate limit (Retry-After supplied)':'SockOdds HTTP 429: rate or quota exhausted, reset time unknown';
+        const reason=monthly?'SockOdds monthly allowance exhausted; no requests until next UTC month':hasRetry?'SockOdds rate limit (Retry-After supplied)':'SockOdds HTTP 429: rate or quota exhausted, reset time unknown';
         return {events:[],rawEvents:0,configured:true,error:reason,retry_at:new Date(pauseUntil).toISOString()};
       }
       if(!r.ok)return {events:[],rawEvents:0,configured:true,error:'SockOdds HTTP '+r.status};
@@ -578,15 +582,83 @@ async function krokOdds(sport,enabled){
     return {events:[],configured:true,error:/429/.test(msg)?'Krok monthly quota or request limit reached (HTTP 429)':/402|403/.test(msg)?'Krok API plan does not permit this request':msg.slice(0,150)};
   }
 }
-async function scan(sport,includeKrok=false){
+
+/*
+ * The Odds API (v4): optional licensed source, 1 Australian region + h2h.
+ * Never call when disabled, unconfigured, or the user has not chosen a sport.
+ * No API keys are exposed to the browser or to diagnostic messages.
+ * The free plan has a finite monthly credit quota.
+ */
+const THE_ODDS_SPORTS={
+  afl:'aussierules_afl',nrl:'rugbyleague_nrl',basketball:'basketball_nba',
+  nfl:'americanfootball_nfl',nhl:'icehockey_nhl',baseball:'baseball_mlb',
+  soccer:'soccer_epl',cricket:'cricket_big_bash'
+};
+const theOddsCache=new Map();
+function theOddsConvert(data,sport){
+  const events=[],books=new Set();
+  let stale=0,invalid=0,listed=0;
+  if(!Array.isArray(data))return {events,bookmakers:[],listed:0,stale,invalid};
+  const now=Date.now();
+  for(const match of data){
+    listed++;
+    if(!match||!match.home_team||!match.away_team)continue;
+    if(!(parseMs(match.commence_time)>now+FUTURE_BUFFER_MS))continue;
+    for(const book of Array.isArray(match.bookmakers)?match.bookmakers:[]){
+      if(!book||/betfair_ex|smarkets|matchbook|exchange|prophetx/i.test(String(book.key||book.title||'')))continue;
+      const market=(Array.isArray(book.markets)?book.markets:[]).find(m=>m?.key==='h2h');
+      if(!market)continue;
+      const observed=parseMs(market.last_update||book.last_update);
+      if(!Number.isFinite(observed)||observed>now+60*1000||now-observed>10*60*1000){stale++;continue}
+      if(!Array.isArray(market.outcomes)){invalid++;continue}
+      const selections=market.outcomes.filter(o=>o&&o.name&&o.point==null&&Number.isFinite(Number(o.price))&&Number(o.price)>1)
+        .map(o=>({name:o.name,odds:Number(o.price)}));
+      const bookmaker=bookmakerName(book.title||book.key);
+      const item=eventObj(sport,match.home_team,match.away_team,match.commence_time,bookmaker,selections,'the-odds-api');
+      if(item){events.push(item);books.add(item.book)}
+      else invalid++;
+    }
+  }
+  return {events,bookmakers:[...books],listed,stale,invalid};
+}
+async function theOddsApi(sport,enabled){
+  const configured=Boolean(process.env.THE_ODDS_API_KEY);
+  if(!enabled)return {events:[],configured,disabled:true};
+  if(!configured)return {events:[],configured:false,error:'THE_ODDS_API_KEY missing in Vercel Production settings'};
+  if(!sport)return {events:[],configured:true,error:'Choose one sport before using The Odds API'};
+  const code=THE_ODDS_SPORTS[sport];
+  if(!code)return {events:[],configured:true,error:'The Odds API sport not yet mapped; choose AFL, NRL, NBA, NHL, NFL, MLB, EPL soccer or Big Bash cricket'};
+  const previous=theOddsCache.get(code);
+  if(previous&&previous.until>Date.now())return previous.promise;
+  const promise=(async()=>{
+    const qs=new URLSearchParams({apiKey:process.env.THE_ODDS_API_KEY,regions:'au',markets:'h2h',oddsFormat:'decimal',dateFormat:'iso'});
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),14000);
+    try{
+      const response=await fetch('https://api.the-odds-api.com/v4/sports/'+code+'/odds/?'+qs,{signal:controller.signal,headers:{Accept:'application/json'}});
+      const remain=Number(response.headers?.get?.('x-requests-remaining'));
+      const remaining=Number.isFinite(remain)&&remain>=0?remain:undefined;
+      if(response.status===401||response.status===403)return {events:[],configured:true,error:'The Odds API key or subscription is unauthorized (HTTP '+response.status+')'};
+      if(response.status===429)return {events:[],configured:true,error:'The Odds API is rate-limited (HTTP 429)',remaining};
+      if(!response.ok)return {events:[],configured:true,error:'The Odds API returned HTTP '+response.status,remaining};
+      const json=await response.json();
+      if(!Array.isArray(json))return {events:[],configured:true,error:'Unexpected The Odds API response',remaining};
+      return {...theOddsConvert(json,sport),configured:true,remaining,league:code};
+    }catch(error){return {events:[],configured:true,error:'The Odds API request failed: '+String(error?.name||'network failure').slice(0,50)}}
+    finally{clearTimeout(timer)}
+  })();
+  theOddsCache.set(code,{until:Date.now()+5*60*1000,promise});
+  return promise;
+}
+async function scan(sport,includeKrok=false,includeOdds=false){
   const providers=[];
   // Independent feeds run together; an unavailable bookmaker does not block others.
-  const [pr,nr,lr,sr,kr]=await Promise.allSettled([
+  const [pr,nr,lr,sr,kr,or]=await Promise.allSettled([
     pointsBet(),
     entainBook('api.neds.com.au','Neds',[],sport),
     entainBook('api.ladbrokes.com.au','Ladbrokes AU',[],sport),
     sockOdds(),
-    krokOdds(sport,includeKrok)
+    krokOdds(sport,includeKrok),
+    theOddsApi(sport,includeOdds)
   ]);
   const pe=pr.status==='fulfilled'?pr.value:[];
   if(pr.status==='fulfilled')providers.push({provider:'PointsBet AU',ok:true,events:pe.length});
@@ -608,7 +680,10 @@ async function scan(sport,includeKrok=false){
   providers.unshift({provider:'SockOdds',ok:!sock.error,events:sock.events.length,listed:sock.rawEvents??0,league:sock.league,configured:sock.configured,bookmakers:sock.bookmakers??[],bookmaker_count:sock.bookmakers?.length??0,retry_at:sock.retry_at,error:sock.error});
   const krok=kr.status==='fulfilled'?kr.value:{events:[],configured:!!process.env.KROK_ODDS_API_KEY,error:'Krok integration unavailable'};
   if(includeKrok)providers.push({provider:'Krok Odds (optional)',ok:!krok.error,events:krok.events.length,listed:krok.listed??0,configured:krok.configured,bookmakers:krok.bookmakers??[],stale:krok.stale??0,slug:krok.slug,error:krok.error});
-  let all=[...pe,...neds.events,...lads.events,...sock.events,...krok.events];
+  const third=or.status==='fulfilled'?or.value:{events:[],configured:!!process.env.THE_ODDS_API_KEY,error:'The Odds API request unavailable'};
+  if(includeOdds)providers.push({provider:'The Odds API (optional)',ok:!third.error,events:third.events.length,listed:third.listed??0,
+    configured:third.configured,bookmakers:third.bookmakers??[],stale:third.stale??0,invalid:third.invalid??0,remaining:third.remaining,league:third.league,error:third.error});
+  let all=[...pe,...neds.events,...lads.events,...sock.events,...krok.events,...third.events];
   if(sport)all=all.filter(e=>e.sport===sport);
   const buckets=merge(all);
   const distinctBooks=[...new Set(all.map(x=>x.book))].sort();
@@ -649,9 +724,11 @@ export default async function handler(req,res){
   if(!['all','h2h','lines','spreads','totals'].includes(mode))return res.status(400).json({error:'Unsupported market_mode'});
   if(!['all','h2h'].includes(mode)&&!debug)return res.status(200).json([]);
   const includeKrok=String(req.query.include_krok||'')==='1';
-  const key=(sport||'all')+(includeKrok?':krok':'');let item=scanCache.get(key);
+  const includeOdds=String(req.query.include_odds_api||'')==='1';
+  if(includeKrok&&includeOdds)return res.status(400).json({error:'Choose one optional aggregator to conserve limited API credits'});
+  const key=(sport||'all')+(includeKrok?':krok':'')+(includeOdds?':odds':'');let item=scanCache.get(key);
   if(!item||item.expires<Date.now()){
-    item={expires:Date.now()+90*1000,promise:scan(sport,includeKrok)};
+    item={expires:Date.now()+90*1000,promise:scan(sport,includeKrok,includeOdds)};
     scanCache.set(key,item);
   }
   try{
