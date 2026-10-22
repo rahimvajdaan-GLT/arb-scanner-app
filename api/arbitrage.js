@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v22-price-audit';
+const ENGINE='au-openbooks-v23-validation-audit';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=90*60*1000;
 const BASE_HEADERS={
@@ -295,8 +295,21 @@ async function scan(sport){
   const cross=buckets.filter(b=>b.books.size>=2);
   const arbs=cross.map(arb).filter(Boolean).sort((a,b)=>b.arb_pct-a.arb_pct).slice(0,25);
 
+  const auditReasons={mixed_outcome_counts:0,incomplete_outcomes:0,invalid_prices:0,comparable:0};
+  const rejectedExamples=[];
+  for(const b of cross){
+    const counts=[...b.outcomeCounts.values()];
+    const roles=counts[0]===3?['home','draw','away']:['home','away'];
+    let reason;
+    if(counts.some(c=>c!==counts[0])||![2,3].includes(counts[0]))reason='mixed_outcome_counts';
+    else if(roles.some(role=>!b.offers.some(o=>o.role===role)))reason='incomplete_outcomes';
+    else if(roles.some(role=>!b.offers.some(o=>o.role===role&&Number.isFinite(o.odds)&&o.odds>1)))reason='invalid_prices';
+    else reason='comparable';
+    auditReasons[reason]++;
+    if(reason!=='comparable'&&rejectedExamples.length<3)rejectedExamples.push({fixture:b.home+' vs '+b.away,reason,books:[...b.books],outcomes:[...b.outcomeCounts].map(([book,count])=>({book,count}))});
+  }
   const audited=cross.map(priceAudit).filter(Boolean).sort((a,b)=>b.roi_pct-a.roi_pct);
-  return {engine:ENGINE,providers,merged_games:buckets.length,cross_book_games:cross.length,comparable_markets:audited.length,closest_markets:audited.slice(0,5),arbs:arbs.length,results:arbs,scan_scope:'Limited requests with cooldown on provider rate limits'};
+  return {engine:ENGINE,providers,merged_games:buckets.length,cross_book_games:cross.length,comparable_markets:audited.length,validation_reasons:auditReasons,rejected_examples:rejectedExamples,closest_markets:audited.slice(0,5),arbs:arbs.length,results:arbs,scan_scope:'Limited requests with cooldown on provider rate limits'};
 }
 export default async function handler(req,res){
   if(req.method!=='GET'){res.setHeader('Allow','GET');return res.status(405).json({error:'Method not allowed'})}
