@@ -108,3 +108,18 @@ test('frontend has one comparison request per scan, with same payload shared to 
  assert.doesNotMatch(page,/fetch\('\/api\/arbitrage\?/);
  assert.match(page,/addEventListener\('arb:scan'/);
 });
+
+test('incomplete soccer moneyline is excluded rather than mislabelled as a two-way arb',()=>{
+ const two=fixture('TAB','Arsenal','Chelsea',[['home',2.3],['away',2.5]],'soccer');
+ assert.equal(two,null,'soccer full-time winner must include draw');
+ const three=fixture('TAB','Arsenal','Chelsea',[['home',2.3],['draw',3.3],['away',2.5]],'soccer');
+ assert.ok(three);
+});
+test('frontend invalidates old quotes and refreshes the versioned script',()=>{
+ const front=fs.readFileSync(path.join(__dirname,'../live.js'),'utf8');
+ const html=fs.readFileSync(path.join(__dirname,'../scanner.html'),'utf8');
+ assert.match(front,/MAX_QUOTE_AGE_MS = 2 \* 60 \* 1000/);
+ assert.match(front,/latestEvents = \[\];/);
+ assert.match(html,/arb:scan-expired/);
+ assert.match(html,/live\.js\?v=36/);
+});
