@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v31-audited-matching';
+const ENGINE='au-openbooks-v32-market-scoped-quotes';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=30*60*1000;
 const BASE_HEADERS={
@@ -127,30 +127,58 @@ function sameFixture(a,b){
   const direct=same(a.home,b.home)&&same(a.away,b.away),rev=same(a.home,b.away)&&same(a.away,b.home);if(!direct&&!rev)return false;
   const at=parseMs(a.time),bt=parseMs(b.time);return !Number.isFinite(at)||!Number.isFinite(bt)||Math.abs(at-bt)<=MATCH_WINDOW_MS;
 }
-function entainCardSelections(card,h,a){
-  const markets=objValues(card?.markets), entrantsObj=card?.entrants&&typeof card.entrants==='object'?card.entrants:{}, pricesObj=card?.prices&&typeof card.prices==='object'?card.prices:{};
-  const entrants=objValues(entrantsObj);
-  const priceByEntrant=new Map();
-  for(const [k,p] of Object.entries(pricesObj)){
-    const id=String(k).split(':')[0];const o=entainDecimal(p);if(o)priceByEntrant.set(id,o);
-  }
-  for(const p of objValues(pricesObj)){
-    const id=p?.entrant_id??p?.entrantId??p?.selection_id??p?.selectionId;const o=entainDecimal(p);if(id!=null&&o)priceByEntrant.set(String(id),o);
-  }
+function entainCardSelections(card,h,a,sport){
+  const markets=card?.markets&&typeof card.markets==='object'?Object.entries(card.markets):[];
+  const entrantsObj=card?.entrants&&typeof card.entrants==='object'?card.entrants:{};
+  const pricesObj=card?.prices&&typeof card.prices==='object'?card.prices:{};
   const out=[];
-  for(const m of markets){
-    const mn=String(m?.name??m?.display_name??'').trim();if(!/^(match betting|head to head|match result|moneyline)$/i.test(mn)&&!/match betting|head to head|match result|moneyline/i.test(mn))continue;
-    const ids=Array.isArray(m?.entrant_ids)?m.entrant_ids:[];
-    const rows=ids.length?ids.map(id=>entrantsObj?.[id]).filter(Boolean):objValues(m?.entrants||m?.selections||m?.outcomes);
-    for(const e of rows){
-      const id=String(e?.id??e?.entrant_id??e?.entrantId??'');
-      const o=priceByEntrant.get(id)||entainDecimal(e?.price??e?.prices?.[0]??e);
-      const name=e?.name??e?.display_name;const r=role(name,h,a,e?.home_away??e?.homeAway);if(r&&o)out.push({name,role:r,odds:o});
+  // Never infer match-result prices from entrants belonging to other markets.
+  for(const [marketKey,m] of markets){
+    if(!m||typeof m!=='object')continue;
+    const label=String(m.name??m.display_name??'').trim();
+    // An unqualified market title is essential: '1st Half Match Betting'
+    // and 'Winning Margin' are not full-match moneyline markets.
+    if(!/^(match betting|head to head|head-to-head|match result|moneyline|full time result|full-time result|game winner)$/i.test(label))continue;
+    if(m.is_open_for_betting===false||m.is_open===false||m.suspended===true)continue;
+    const mid=String(m.id??marketKey);
+    const ids=Array.isArray(m.entrant_ids)?m.entrant_ids.map(String):[];
+    const rows=ids.length?ids.map(id=>({id,...entrantsObj[id]})).filter(row=>row.name||row.display_name):
+      Object.entries(entrantsObj).filter(([id,e])=>String(e?.market_id??e?.marketId??'')===mid||String(e?.market_id??e?.marketId??'')===marketKey).map(([id,e])=>({id,...e}));
+    if(!rows.length)continue;
+    const selections=[];
+    for(const entrant of rows){
+      const eid=String(entrant.id??entrant.entrant_id??'');
+      const name=entrant.name??entrant.display_name;
+      const r=role(name,h,a,entrant.home_away??entrant.homeAway);
+      if(!r||!eid)continue;
+      // Prices are only eligible when explicitly tied to this market's entrant.
+      const quotes=Object.entries(pricesObj).filter(([priceKey,p])=>{
+        if(!p||typeof p!=='object'||p.available===false||p.is_open===false)return false;
+        const entrantId=String(p.entrant_id??p.entrantId??p.selection_id??p.selectionId??'');
+        const marketId=String(p.market_id??p.marketId??'');
+        if(entrantId&&entrantId!==eid)return false;
+        if(marketId&&marketId!==mid&&marketId!==marketKey)return false;
+        if(entrantId&&marketId)return true;
+        // Some card versions use market:entrant composite keys.
+        const segments=String(priceKey).split(':');
+        return segments.includes(eid)&&(segments.includes(mid)||segments.includes(marketKey));
+      }).map(([,p])=>entainDecimal(p)).filter(Boolean);
+      // A market-attached entrant price is also safe if no separate quote exists.
+      const attached=entainDecimal(entrant.price??entrant.odds);
+      if(attached)quotes.push(attached);
+      if(quotes.length)selections.push({name,role:r,odds:Math.max(...quotes)});
     }
-  }
-  if(out.length>=2)return out;
-  for(const e of entrants){
-    const id=String(e?.id??e?.entrant_id??e?.entrantId??'');const o=priceByEntrant.get(id)||entainDecimal(e?.price);const name=e?.name??e?.display_name;const r=role(name,h,a,e?.home_away??e?.homeAway);if(r&&o)out.push({name,role:r,odds:o});
+    const distinct=new Set(selections.map(x=>x.role));
+    if(distinct.size!==selections.length||!distinct.has('home')||!distinct.has('away'))continue;
+    // A regular-time soccer match winner must include the draw.
+    if(sport==='soccer'&&!distinct.has('draw'))continue;
+    if(selections.length!==2&&selections.length!==3)continue;
+    // A full-market overround wildly below 100% strongly suggests
+    // mismatched prices or incomplete settlement. Fail closed.
+    const overround=selections.reduce((sum,x)=>sum+1/x.odds,0);
+    if(!Number.isFinite(overround)||overround<0.92)continue;
+    out.push(...selections);
+    break;
   }
   return out;
 }
@@ -200,7 +228,7 @@ async function entainBook(host,book,anchors,sport){
   const events=[];let cardFailures=0;
   for(const r of cards){
     if(r.status==='rejected'){cardFailures++;continue}
-    const{x,card}=r.value;const sels=entainCardSelections(card,x.ta.home,x.ta.away);const item=eventObj(x.meta.key,x.ta.home,x.ta.away,x.time,book,sels,book.toLowerCase());if(item)events.push(item);
+    const{x,card}=r.value;const sels=entainCardSelections(card,x.ta.home,x.ta.away,x.meta.key);const item=eventObj(x.meta.key,x.ta.home,x.ta.away,x.time,book,sels,book.toLowerCase());if(item)events.push(item);
   }
   return{events,listed:listed.length,cards:cards.length,cardFailures,categoryErrors,categories:selected.map(x=>x.key)};
 }
