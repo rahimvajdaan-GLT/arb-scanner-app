@@ -533,6 +533,9 @@ function krokEvents(data,sport){
     if(!pair){invalid++;continue}
     const book=String(ev.bookmaker||ev.bookmaker_key||'').trim();
     if(!book){invalid++;continue}
+    // Exchange/prediction-market quotes need commission, liquidity and
+    // settlement-specific models before they are comparable to sportsbooks.
+    if(/betfair|smarkets|matchbook|prophetx|kalshi|polymarket|exchange/i.test(book))continue;
     for(const market of objValues(ev.markets)){
       if(!krokFullMarket(market))continue;
       if(market?.suspended===true)continue;
