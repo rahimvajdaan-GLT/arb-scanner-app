@@ -55,6 +55,34 @@ test('three-outcome football comparison uses all home draw away outcomes',()=>{
  assert.ok(a&&a.arb_pct>0);
  assert.equal(a.selections.length,3);
 });
+test('sport filter values are compatible with the actual engine',()=>{
+ const source=fs.readFileSync(path.join(__dirname,'../api/sports.js'),'utf8');
+ const aliases=new Map([
+ ['nba','basketball'],['mlb','baseball'],['ncaaf','nfl'],
+ ['soccer_epl','soccer'],['soccer_mls','soccer']
+ ]);
+ const options=[...source.matchAll(/\{key:'([a-z_]+)',title:/g)].map(m=>m[1]);
+ assert.ok(options.length>=7,'expected multiple real sport filters');
+ for(const key of options)assert.ok(['basketball','baseball','soccer','nfl','nhl','tennis','afl','nrl','cricket'].includes(aliases.get(key)||key),key+' not mapped to live engine');
+});
+test('fixture matching does not combine rival teams in same city or distant starting times',()=>{
+ const same=vm.runInNewContext(js+'\nthis.same',env);
+ assert.equal(same('New York Jets','New York Giants'),false);
+ assert.equal(same('NY Jets','New York Jets'),true);
+ const a=fixture('Neds','New York Jets','Cleveland Browns',[['home',2.0],['away',1.9]],'nfl');
+ const late=E.eventObj('nfl','NY Jets','Cleveland Browns',new Date(Date.now()+24*60*60*1000+42*60000).toISOString(),'Ladbrokes AU',[{role:'home',odds:2.2},{role:'away',odds:1.8}],'test');
+ assert.equal(E.merge([a,late]).length,2);
+});
+test('SockOdds HTTP 429 honors Retry-After without repeated calls to the same function instance',async()=>{
+ const scope={console,Date,URL,URLSearchParams,setTimeout,clearTimeout,process:{env:{SOCKODDS_API_KEY:'test-key'}},calls:0};
+ scope.fetch=async()=>{scope.calls++;return {status:429,ok:false,headers:{get:k=>k==='retry-after'?'120':null}}};
+ vm.runInNewContext(js+'\nthis.sockOdds=sockOdds',scope);
+ const a=await scope.sockOdds(),b=await scope.sockOdds();
+ assert.match(a.error,/minute request limit/);
+ assert.equal(b.error,a.error);
+ assert.equal(scope.calls,1);
+ assert.ok(Date.parse(a.retry_at)>Date.now());
+});
 test('frontend has one comparison request per scan, with same payload shared to board',()=>{
  const front=fs.readFileSync(path.join(__dirname,'../live.js'),'utf8');
  const page=fs.readFileSync(path.join(__dirname,'../scanner.html'),'utf8');
