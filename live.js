@@ -310,7 +310,8 @@ async function scanLive() {
     }
     if (serial !== requestSerial) return;
     latestEvents = Array.isArray(data.results) ? data.results.filter(isFutureEvent) : [];
-    latestScanTime = new Date();
+    const sourceTime = Date.parse(String(data.scanned_at || ''));
+    latestScanTime = Number.isFinite(sourceTime) && sourceTime <= Date.now() ? new Date(sourceTime) : new Date();
     renderLive(latestEvents, latestScanTime);
     window.dispatchEvent(new CustomEvent('arb:scan', {detail:data}));
     const feeds=Array.isArray(data.providers)?data.providers:[];
