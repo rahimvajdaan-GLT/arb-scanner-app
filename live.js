@@ -267,8 +267,23 @@ function renderLive(events, scanTime = latestScanTime || new Date()) {
   });
 }
 
+const MAX_QUOTE_AGE_MS = 2 * 60 * 1000;
 function renderCached() {
-  if (latestEvents.length) renderLive(latestEvents, latestScanTime || new Date());
+  if (!latestScanTime) return;
+  if (Date.now() - latestScanTime.getTime() > MAX_QUOTE_AGE_MS) {
+    latestEvents = [];
+    latestScanTime = null;
+    liveEls.metricCount.textContent = '—';
+    liveEls.metricBestRoi.textContent = '—';
+    liveEls.metricBestProfit.textContent = '—';
+    liveEls.status.textContent = '● Quotes expired';
+    liveEls.message.textContent = 'Displayed odds have expired. Scan again for current bookmaker prices.';
+    liveEls.lastUpdated.textContent = 'Quotes expired — rescan';
+    liveEls.results.innerHTML = '<div class="no-results"><strong>Quotes expired</strong><span>Odds change quickly. Run a new scan to verify current pricing.</span></div>';
+    window.dispatchEvent(new CustomEvent('arb:scan-expired'));
+    return;
+  }
+  if (latestEvents.length) renderLive(latestEvents, latestScanTime);
 }
 
 async function loadSportsCatalog() {
