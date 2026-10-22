@@ -5,6 +5,7 @@ const liveEls = {
   stake: document.getElementById('liveStake'),
   books: document.getElementById('liveBooks'),
   autoRefresh: document.getElementById('autoRefresh'),
+  extraFeed: document.getElementById('liveExtraFeed'),
   lastUpdated: document.getElementById('lastUpdated'),
   message: document.getElementById('liveMessage'),
   results: document.getElementById('liveResults'),
@@ -311,6 +312,7 @@ async function scanLive() {
   const params = new URLSearchParams();
   const sport = liveEls.sport.value.trim();
   if (sport) params.set('sport_key', sport);
+  if (liveEls.extraFeed?.checked) params.set('include_krok', '1');
   params.set('market_mode', liveEls.market.value || 'all');
   params.set('min_profit_pct', '0');
   params.set('debug', '1');
@@ -375,8 +377,7 @@ async function scanLive() {
 function configureAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = null;
-  if (liveEls.autoRefresh.checked) {
-    // Manual first scan already runs on load; no second request on toggle.
+  if (liveEls.autoRefresh.checked && !liveEls.extraFeed?.checked) {
     refreshTimer = setInterval(scanLive, 900000);
   }
 }
@@ -389,6 +390,12 @@ function setBookPreset(value) {
 
 liveEls.scanBtn.addEventListener('click', scanLive);
 liveEls.autoRefresh.addEventListener('change', configureAutoRefresh);
+if (liveEls.extraFeed) liveEls.extraFeed.addEventListener('change', ()=>{
+  // Protect free API call allowance: optional feed always requires manual scans.
+  if (liveEls.extraFeed.checked) liveEls.autoRefresh.checked = false;
+  configureAutoRefresh();
+  liveEls.message.textContent = liveEls.extraFeed.checked ? 'Choose one sport and click Scan. Extra feed uses your Krok free API calls when configured.' : 'Extra bookmaker feed disabled. Existing sources remain available.';
+});
 liveEls.stake.addEventListener('input', renderCached);
 liveEls.books.addEventListener('input', renderCached);
 liveEls.sport.addEventListener('change', scanLive);
