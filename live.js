@@ -327,12 +327,29 @@ async function scanLive() {
     latestEvents = Array.isArray(data.results) ? data.results.filter(isFutureEvent) : [];
     const sourceTime = Date.parse(String(data.scanned_at || ''));
     latestScanTime = Number.isFinite(sourceTime) && sourceTime <= Date.now() ? new Date(sourceTime) : new Date();
+    const expiredSnapshot = Date.now() - latestScanTime.getTime() > MAX_QUOTE_AGE_MS;
+    if (expiredSnapshot) latestEvents = [];
     renderLive(latestEvents, latestScanTime);
     window.dispatchEvent(new CustomEvent('arb:scan', {detail:data}));
+    if (expiredSnapshot) {
+      liveEls.metricCount.textContent = '—';
+      liveEls.metricBestRoi.textContent = '—';
+      liveEls.metricBestProfit.textContent = '—';
+      liveEls.status.textContent = '● Quotes expired';
+      liveEls.message.textContent = 'Cached bookmaker quotes are too old for live arbitrage. Scan again after the feed refreshes.';
+      window.dispatchEvent(new CustomEvent('arb:scan-expired'));
+      return;
+    }
     const feeds=Array.isArray(data.providers)?data.providers:[];
     const working=feeds.filter(p=>Number(p.events)>0);
     const errors=feeds.filter(p=>p.error);
     liveEls.status.textContent=!working.length?'● Odds sources unavailable':errors.length?'● Partial odds coverage':'● Recent bookmaker quotes · Pre-match';
+    if (!working.length) {
+      liveEls.metricCount.textContent = '—';
+      liveEls.metricBestRoi.textContent = '—';
+      liveEls.metricBestProfit.textContent = '—';
+      liveEls.message.textContent = 'All odds sources are unavailable or rate-limited. Arbitrage cannot be verified.';
+    }
   } catch (error) {
     if (error.name === 'AbortError') return;
     // Invalidated scans must never repaint historical positive results.
@@ -360,7 +377,7 @@ function configureAutoRefresh() {
   refreshTimer = null;
   if (liveEls.autoRefresh.checked) {
     // Manual first scan already runs on load; no second request on toggle.
-    refreshTimer = setInterval(scanLive, 300000);
+    refreshTimer = setInterval(scanLive, 900000);
   }
 }
 
