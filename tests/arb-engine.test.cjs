@@ -121,7 +121,7 @@ test('frontend invalidates old quotes and refreshes the versioned script',()=>{
  assert.match(front,/MAX_QUOTE_AGE_MS = 2 \* 60 \* 1000/);
  assert.match(front,/latestEvents = \[\];/);
  assert.match(html,/arb:scan-expired/);
- assert.match(html,/live\.js\?v=36/);
+ assert.match(html,/live\.js\?v=39/);
 });
 
 test('nested Entain event cards with decimal numeric odds yield two valid selections',()=>{
