@@ -516,6 +516,8 @@ function krokSportRow(rows,sport){
 function krokFullMarket(m){
   const key=String(m?.key||'').toLowerCase().trim();
   const name=String(m?.name||'').trim();
+  const period=String(m?.period||'').toLowerCase();
+  if(/half|quarter|period|regulation|60.?min|set [1-5]/i.test(name+' '+period))return false;
   return key==='h2h'||/^(match betting|match result|head.to.head|moneyline|full.time result|game winner)$/i.test(name);
 }
 function krokEvents(data,sport){
