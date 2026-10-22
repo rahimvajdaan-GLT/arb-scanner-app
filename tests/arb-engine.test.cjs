@@ -8,7 +8,7 @@ const path=require('node:path');
 const js=fs.readFileSync(path.join(__dirname,'../api/arbitrage.js'),'utf8')
  .replace('export default async function handler','async function handler');
 const env={console,Date,URL,URLSearchParams,setTimeout,clearTimeout,process:{env:{}}};
-vm.runInNewContext(js+'\nthis.testEngine={eventObj,merge,priceAudit,arb,bookmakerName};',env,{filename:'api/arbitrage.js'});
+vm.runInNewContext(js+'\nthis.testEngine={eventObj,merge,priceAudit,arb,bookmakerName,same};',env,{filename:'api/arbitrage.js'});
 const E=env.testEngine;
 const future=new Date(Date.now()+24*60*60*1000).toISOString();
 function fixture(book,home,away,values,sport='basketball'){
@@ -66,7 +66,7 @@ test('sport filter values are compatible with the actual engine',()=>{
  for(const key of options)assert.ok(['basketball','baseball','soccer','nfl','nhl','tennis','afl','nrl','cricket'].includes(aliases.get(key)||key),key+' not mapped to live engine');
 });
 test('fixture matching does not combine rival teams in same city or distant starting times',()=>{
- const same=vm.runInNewContext(js+'\nthis.same',env);
+ const same=E.same;
  assert.equal(same('New York Jets','New York Giants'),false);
  assert.equal(same('NY Jets','New York Jets'),true);
  const a=fixture('Neds','New York Jets','Cleveland Browns',[['home',2.0],['away',1.9]],'nfl');
