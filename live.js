@@ -316,7 +316,7 @@ async function scanLive() {
   params.set('debug', '1');
 
   try {
-    const response = await fetch(`/api/arbitrage?${params.toString()}`, { cache: 'no-store', signal: activeController.signal });
+    const response = await fetch(`/api/arbitrage?${params.toString()}`, { signal: activeController.signal });
     const contentType = response.headers.get('content-type') || '';
     const data = contentType.includes('application/json') ? await response.json() : { error: await response.text() };
     if (!response.ok) {
