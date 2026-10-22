@@ -225,12 +225,26 @@ async function entainBook(host,book,anchors,sport){
       if(/HTTP 429/.test(String(e?.message||e)))break;
     }
   }
+  // Public provider schema metadata only; helps detect feed format changes.
+  const representative=cards.find(r=>r.status==='fulfilled')?.value?.card;
+  let schema_sample;
+  if(representative){
+    const markets=Object.entries(representative.markets||{});
+    const money=markets.filter(([,m])=>/match betting|head to head|moneyline|match result|full.time result/i.test(String(m?.name||m?.display_name||'')));
+    schema_sample={
+      market_count:markets.length,entrant_count:Object.keys(representative.entrants||{}).length,price_count:Object.keys(representative.prices||{}).length,
+      named_markets:markets.slice(0,8).map(([k,m])=>({id:k,name:m?.name||m?.display_name,fields:Object.keys(m||{}).slice(0,10)})),
+      relevant_markets:money.slice(0,3).map(([k,m])=>({id:k,name:m?.name||m?.display_name,entrant_ids:Array.isArray(m?.entrant_ids)?m.entrant_ids.slice(0,4):m?.entrant_ids,market_keys:Object.keys(m||{}).slice(0,12)})),
+      entrant_sample:Object.entries(representative.entrants||{}).slice(0,2).map(([k,v])=>({key:k,fields:Object.keys(v||{}),market_id:v?.market_id,id:v?.id,name:v?.name})),
+      price_sample:Object.entries(representative.prices||{}).slice(0,3).map(([k,v])=>({key:k,fields:Object.keys(v||{}),market_id:v?.market_id,entrant_id:v?.entrant_id,odds_fields:Object.keys(v?.odds||{})}))
+    };
+  }
   const events=[];let cardFailures=0;
   for(const r of cards){
     if(r.status==='rejected'){cardFailures++;continue}
     const{x,card}=r.value;const sels=entainCardSelections(card,x.ta.home,x.ta.away,x.meta.key);const item=eventObj(x.meta.key,x.ta.home,x.ta.away,x.time,book,sels,book.toLowerCase());if(item)events.push(item);
   }
-  return{events,listed:listed.length,cards:cards.length,cardFailures,categoryErrors,categories:selected.map(x=>x.key)};
+  return{events,listed:listed.length,cards:cards.length,cardFailures,categoryErrors,categories:selected.map(x=>x.key),schema_sample};
 }
 
 function merge(events){
@@ -387,9 +401,9 @@ async function scan(sport){
       entainBook('api.neds.com.au','Neds',pe,sport),
       entainBook('api.ladbrokes.com.au','Ladbrokes AU',pe,sport)
     ]);
-    if(nr.status==='fulfilled'){neds=nr.value;providers.push({provider:'Neds',ok:true,events:neds.events.length,listed:neds.listed,cards:neds.cards,card_failures:neds.cardFailures,categories:neds.categories||[],error:neds.categoryErrors.length?neds.categoryErrors.join(' | '):undefined})}
+    if(nr.status==='fulfilled'){neds=nr.value;providers.push({provider:'Neds',ok:true,events:neds.events.length,listed:neds.listed,cards:neds.cards,card_failures:neds.cardFailures,categories:neds.categories||[],schema_sample:neds.schema_sample,error:neds.categoryErrors.length?neds.categoryErrors.join(' | '):undefined})}
     else providers.push({provider:'Neds',ok:false,events:0,error:String(nr.reason?.message||nr.reason).slice(0,200)});
-    if(lr.status==='fulfilled'){lads=lr.value;providers.push({provider:'Ladbrokes AU',ok:true,events:lads.events.length,listed:lads.listed,cards:lads.cards,card_failures:lads.cardFailures,categories:lads.categories||[],error:lads.categoryErrors.length?lads.categoryErrors.join(' | '):undefined})}
+    if(lr.status==='fulfilled'){lads=lr.value;providers.push({provider:'Ladbrokes AU',ok:true,events:lads.events.length,listed:lads.listed,cards:lads.cards,card_failures:lads.cardFailures,categories:lads.categories||[],schema_sample:lads.schema_sample,error:lads.categoryErrors.length?lads.categoryErrors.join(' | '):undefined})}
     else providers.push({provider:'Ladbrokes AU',ok:false,events:0,error:String(lr.reason?.message||lr.reason).slice(0,200)});
   }
 
