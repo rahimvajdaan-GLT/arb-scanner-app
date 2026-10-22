@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v39-market-id-linking';
+const ENGINE='au-openbooks-v40-optional-multibook';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=30*60*1000;
 const BASE_HEADERS={
@@ -488,14 +488,100 @@ function priceAudit(b){
     books:allBooks,bookmaker_count:allBooks.length,
     all_bookmaker_prices:byRole,best_odds:pool.chosen.map(o=>({role:o.role,odds:o.odds,book:o.book}))};
 }
-async function scan(sport){
+
+/**
+ * Optional authorized second aggregator. Never called unless specifically enabled
+ * AND a server-side KROK_ODDS_API_KEY exists. Free Krok keys have a small monthly
+ * request allowance; this is intentionally opt-in for individual scans.
+ */
+const krokIndexCache={until:0,rows:null};
+const KROK_FAMILY_RE={
+  afl:/afl|aussie.?rules|australian.?rules/i,
+  nrl:/nrl|rugby.?league/i,
+  basketball:/nba|nbl|basketball/i,
+  nfl:/nfl|ncaaf|american.?football/i,
+  nhl:/nhl|ice.?hockey/i,
+  baseball:/mlb|baseball/i,
+  soccer:/soccer|epl|premier.?league|serie.?a|la.?liga/i,
+  tennis:/tennis|atp|wta/i,
+  cricket:/cricket|big.?bash/i
+};
+function krokSportRow(rows,sport){
+  const pattern=KROK_FAMILY_RE[sport];if(!pattern)return null;
+  return rows.find(item=>{
+    const value=String(item?.sport||'')+' '+String(item?.slug||'')+' '+String(item?.href||'');
+    return pattern.test(value);
+  })||null;
+}
+function krokFullMarket(m){
+  const key=String(m?.key||'').toLowerCase().trim();
+  const name=String(m?.name||'').trim();
+  return key==='h2h'||/^(match betting|match result|head.to.head|moneyline|full.time result|game winner)$/i.test(name);
+}
+function krokEvents(data,sport){
+  const entries=Array.isArray(data?.data)?data.data:[];
+  const events=[];const books=new Set();
+  let stale=0,invalid=0;
+  for(const ev of entries){
+    if(ev?.in_play===true||ev?.status==='in_play')continue;
+    const captured=parseMs(ev.captured_at??ev.updated_at??ev.observed_at);
+    // Current unverified prices should not be used in theoretical arb signals.
+    if(!Number.isFinite(captured)||Math.abs(Date.now()-captured)>10*60*1000){stale++;continue}
+    const pair=ev.home&&ev.away?{home:ev.home,away:ev.away}:teams(ev.event||ev.name);
+    if(!pair){invalid++;continue}
+    const book=String(ev.bookmaker||ev.bookmaker_key||'').trim();
+    if(!book){invalid++;continue}
+    for(const market of objValues(ev.markets)){
+      if(!krokFullMarket(market))continue;
+      if(market?.suspended===true)continue;
+      const sels=[];
+      for(const quote of objValues(market.selections)){
+        if(quote?.suspended===true||quote?.line!=null||quote?.place!=null)continue;
+        const odds=dec(quote.price);
+        if(!odds)continue;
+        sels.push({name:quote.name,odds});
+      }
+      const result=eventObj(sport,pair.home,pair.away,ev.start_time||ev.commence_time||ev.starts_at,book,sels,'krok');
+      if(result){events.push(result);books.add(result.book)}
+      break;
+    }
+  }
+  return {events,listed:entries.length,bookmakers:[...books],stale,invalid};
+}
+async function krokOdds(sport,enabled){
+  const configured=Boolean(process.env.KROK_ODDS_API_KEY);
+  if(!enabled)return {events:[],configured,disabled:true};
+  if(!configured)return {events:[],configured:false,error:'Optional Krok feed requires KROK_ODDS_API_KEY in Vercel Production settings'};
+  if(!sport)return {events:[],configured:true,error:'Select a sport before enabling the optional Krok feed'};
+  const headers={'X-API-Key':process.env.KROK_ODDS_API_KEY,'Accept':'application/json'};
+  try{
+    if(!krokIndexCache.rows||krokIndexCache.until<Date.now()){
+      const index=await getJson('https://krokodds.com.au/api/v1/odds-feed/sports',headers,12000);
+      if(!index?.success||!Array.isArray(index?.data))throw Error('Unexpected sport catalogue response');
+      krokIndexCache.rows=index.data;krokIndexCache.until=Date.now()+30*60*1000;
+    }
+    const match=krokSportRow(krokIndexCache.rows,sport);
+    if(!match)return {events:[],configured:true,error:'Krok feed has no listed direct-scrape coverage for selected sport'};
+    const slug=String(match.href||'').split('/').filter(Boolean).at(-1)||String(match.slug||match.sport||'');
+    if(!/^[a-z0-9][a-z0-9_-]{1,75}$/i.test(slug))return {events:[],configured:true,error:'Invalid sport identifier in Krok catalogue'};
+    const q=new URLSearchParams({upcoming:'true',limit:'25'});
+    const response=await getJson('https://krokodds.com.au/api/v1/odds-feed/sports/'+encodeURIComponent(slug)+'?'+q,headers,15000);
+    if(!response?.success||!Array.isArray(response?.data))return {events:[],configured:true,error:'Unexpected Krok odds feed response'};
+    return {...krokEvents(response,sport),configured:true,slug};
+  }catch(e){
+    const msg=String(e?.message||e);
+    return {events:[],configured:true,error:/429/.test(msg)?'Krok monthly quota or request limit reached (HTTP 429)':/402|403/.test(msg)?'Krok API plan does not permit this request':msg.slice(0,150)};
+  }
+}
+async function scan(sport,includeKrok=false){
   const providers=[];
   // Independent feeds run together; an unavailable bookmaker does not block others.
-  const [pr,nr,lr,sr]=await Promise.allSettled([
+  const [pr,nr,lr,sr,kr]=await Promise.allSettled([
     pointsBet(),
     entainBook('api.neds.com.au','Neds',[],sport),
     entainBook('api.ladbrokes.com.au','Ladbrokes AU',[],sport),
-    sockOdds()
+    sockOdds(),
+    krokOdds(sport,includeKrok)
   ]);
   const pe=pr.status==='fulfilled'?pr.value:[];
   if(pr.status==='fulfilled')providers.push({provider:'PointsBet AU',ok:true,events:pe.length});
@@ -515,7 +601,9 @@ async function scan(sport){
   }
   const sock=sr.status==='fulfilled'?sr.value:{events:[],rawEvents:0,configured:true,error:String(sr.reason?.message||sr.reason)};
   providers.unshift({provider:'SockOdds',ok:!sock.error,events:sock.events.length,listed:sock.rawEvents??0,league:sock.league,configured:sock.configured,bookmakers:sock.bookmakers??[],bookmaker_count:sock.bookmakers?.length??0,retry_at:sock.retry_at,error:sock.error});
-  let all=[...pe,...neds.events,...lads.events,...sock.events];
+  const krok=kr.status==='fulfilled'?kr.value:{events:[],configured:!!process.env.KROK_ODDS_API_KEY,error:'Krok integration unavailable'};
+  if(includeKrok)providers.push({provider:'Krok Odds (optional)',ok:!krok.error,events:krok.events.length,listed:krok.listed??0,configured:krok.configured,bookmakers:krok.bookmakers??[],stale:krok.stale??0,slug:krok.slug,error:krok.error});
+  let all=[...pe,...neds.events,...lads.events,...sock.events,...krok.events];
   if(sport)all=all.filter(e=>e.sport===sport);
   const buckets=merge(all);
   const distinctBooks=[...new Set(all.map(x=>x.book))].sort();
@@ -555,9 +643,10 @@ export default async function handler(req,res){
   const sport=ALIASES.get(raw)||raw,mode=String(req.query.market_mode||'all').toLowerCase(),debug=String(req.query.debug||'')==='1';
   if(!['all','h2h','lines','spreads','totals'].includes(mode))return res.status(400).json({error:'Unsupported market_mode'});
   if(!['all','h2h'].includes(mode)&&!debug)return res.status(200).json([]);
-  const key=sport||'all';let item=scanCache.get(key);
+  const includeKrok=String(req.query.include_krok||'')==='1';
+  const key=(sport||'all')+(includeKrok?':krok':'');let item=scanCache.get(key);
   if(!item||item.expires<Date.now()){
-    item={expires:Date.now()+90*1000,promise:scan(sport)};
+    item={expires:Date.now()+90*1000,promise:scan(sport,includeKrok)};
     scanCache.set(key,item);
   }
   try{
