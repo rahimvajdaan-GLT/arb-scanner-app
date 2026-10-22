@@ -142,3 +142,23 @@ test('period winner markets are not misclassified as full-match odds',()=>{
  };
  assert.equal(E.entainCardSelections(card,'Lakers','Celtics','basketball').length,0);
 });
+
+test('AFL market-ID entrant-to-price link excludes other markets',()=>{
+ const card={
+  markets:{match:{id:'match',name:'Match Betting'},prop:{id:'prop',name:'Anytime Goal Kicker'}},
+  entrants:{
+   a:{id:'a',name:'Geelong Cats',market_id:'match'},
+   b:{id:'b',name:'Carlton Blues',market_id:'match'},
+   p:{id:'p',name:'Geelong Cats',market_id:'prop'}
+  },
+  prices:{
+   a:{odds:{numerator:19,denominator:20}},
+   b:{odds:{numerator:1,denominator:1}},
+   p:{odds:{numerator:50,denominator:1}}
+  }
+ };
+ const selections=E.entainCardSelections(card,'Geelong Cats','Carlton Blues','afl');
+ assert.equal(selections.length,2);
+ assert.equal(selections[0].odds,1.95);
+ assert.equal(selections[1].odds,2);
+});
