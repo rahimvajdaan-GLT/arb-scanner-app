@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v38-entain-market-audit';
+const ENGINE='au-openbooks-v39-market-id-linking';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=30*60*1000;
 const BASE_HEADERS={
@@ -152,59 +152,101 @@ function sameFixture(a,b){
   const direct=same(a.home,b.home)&&same(a.away,b.away),rev=same(a.home,b.away)&&same(a.away,b.home);if(!direct&&!rev)return false;
   const at=parseMs(a.time),bt=parseMs(b.time);return !Number.isFinite(at)||!Number.isFinite(bt)||Math.abs(at-bt)<=MATCH_WINDOW_MS;
 }
+function entainId(value){
+  if(value==null)return '';
+  if(typeof value==='string'||typeof value==='number')return String(value);
+  if(typeof value==='object')return String(value.id??value.entrant_id??value.entrantId??value.selection_id??value.selectionId??'');
+  return '';
+}
+function entainSelectionIds(m){
+  const candidates=[m.entrant_ids,m.entrantIds,m.selection_ids,m.selectionIds,m.outcome_ids,m.outcomeIds,m.entrants,m.selections];
+  for(const value of candidates){
+    if(Array.isArray(value)){
+      const ids=value.map(entainId).filter(Boolean);
+      if(ids.length)return ids;
+    }
+    if(value&&typeof value==='object'){
+      const ids=Object.entries(value).map(([key,row])=>entainId(row)||key).filter(Boolean);
+      if(ids.length)return ids;
+    }
+  }
+  return [];
+}
 function entainCardSelections(card,h,a,sport){
   card=entainCardPayload(card);
-  const markets=card?.markets&&typeof card.markets==='object'?Object.entries(card.markets):[];
-  const entrantsObj=card?.entrants&&typeof card.entrants==='object'?card.entrants:{};
-  const pricesObj=card?.prices&&typeof card.prices==='object'?card.prices:{};
-  const out=[];
-  // Never infer match-result prices from entrants belonging to other markets.
+  const markets=Object.entries(card?.markets||{});
+  const entrants=card?.entrants&&typeof card.entrants==='object'?card.entrants:{};
+  const prices=card?.prices&&typeof card.prices==='object'?card.prices:{};
+  // All returned prices must be attributable to this exact market AND a named
+  // participant; do not infer prices by team name across the entire event.
   for(const [marketKey,m] of markets){
-    if(!m||typeof m!=='object')continue;
-    // Exact, explicitly full-game market names only; never treat a period bet as H2H.
-    if(!entainFullMatchMarket(m,sport))continue;
+    if(!m||typeof m!=='object'||!entainFullMatchMarket(m,sport))continue;
     if(m.is_open_for_betting===false||m.is_open===false||m.suspended===true)continue;
-    const mid=String(m.id??marketKey);
-    const ids=Array.isArray(m.entrant_ids)?m.entrant_ids.map(String):[];
-    const rows=ids.length?ids.map(id=>({id,...entrantsObj[id]})).filter(row=>row.name||row.display_name):
-      Object.entries(entrantsObj).filter(([id,e])=>String(e?.market_id??e?.marketId??'')===mid||String(e?.market_id??e?.marketId??'')===marketKey).map(([id,e])=>({id,...e}));
+    const mid=String(m.id??marketKey),marketIds=new Set([mid,String(marketKey)]);
+    const linkedIds=entainSelectionIds(m);
+    const explicitlyLinked=new Set(linkedIds);
+    const rows=[];
+    for(const id of linkedIds){
+      const entry=entrants[id]??(Array.isArray(m.entrants)?m.entrants.find(x=>entainId(x)===id):null);
+      if(entry&&typeof entry==='object')rows.push({key:id,entrant:entry});
+    }
+    // An entrant's market ID is also a strict association.
+    for(const [key,entry] of Object.entries(entrants)){
+      if(!entry||typeof entry!=='object')continue;
+      const entryMarket=entainId(entry.market_id??entry.marketId??entry.market?.id??entry.market);
+      if(entryMarket&&marketIds.has(entryMarket)&&!rows.some(row=>row.key===key)){
+        rows.push({key,entrant:entry});
+        explicitlyLinked.add(key);
+      }
+    }
+    // Some responses attach the market ID to the PRICE rather than the entrant.
+    // This is safe only when both market and entrant IDs are explicit in that quote.
+    for(const [key,price] of Object.entries(prices)){
+      if(!price||typeof price!=='object')continue;
+      const priceMarket=entainId(price.market_id??price.marketId??price.market?.id??price.market);
+      const eid=entainId(price.entrant_id??price.entrantId??price.selection_id??price.selectionId);
+      if(priceMarket&&marketIds.has(priceMarket)&&eid&&entrants[eid]&&!rows.some(row=>row.key===eid)){
+        rows.push({key:eid,entrant:entrants[eid]});
+        explicitlyLinked.add(eid);
+      }
+    }
     if(!rows.length)continue;
     const selections=[];
-    for(const entrant of rows){
-      const eid=String(entrant.id??entrant.entrant_id??'');
-      const name=entrant.name??entrant.display_name;
-      const r=role(name,h,a,entrant.home_away??entrant.homeAway);
-      if(!r||!eid)continue;
-      // Prices are only eligible when explicitly tied to this market's entrant.
-      const quotes=Object.entries(pricesObj).filter(([priceKey,p])=>{
-        if(!p||typeof p!=='object'||p.available===false||p.is_open===false)return false;
-        const entrantId=String(p.entrant_id??p.entrantId??p.selection_id??p.selectionId??'');
-        const marketId=String(p.market_id??p.marketId??'');
-        if(entrantId&&entrantId!==eid)return false;
-        if(marketId&&marketId!==mid&&marketId!==marketKey)return false;
-        if(entrantId&&marketId)return true;
-        // Some card versions use market:entrant composite keys.
-        const segments=String(priceKey).split(':');
-        return segments.includes(eid)&&(segments.includes(mid)||segments.includes(marketKey));
-      }).map(([,p])=>entainDecimal(p)).filter(Boolean);
-      // A market-attached entrant price is also safe if no separate quote exists.
-      const attached=entainDecimal(entrant.price??entrant.odds);
-      if(attached)quotes.push(attached);
-      if(quotes.length)selections.push({name,role:r,odds:Math.max(...quotes)});
+    for(const row of rows){
+      const eid=entainId(row.entrant.id??row.entrant.entrant_id??row.entrant.entrantId)||row.key;
+      const name=row.entrant.name??row.entrant.display_name??row.entrant.displayName;
+      const selectionRole=role(name,h,a,row.entrant.home_away??row.entrant.homeAway);
+      if(!selectionRole||!eid)continue;
+      const valid=[];
+      for(const [priceKey,p] of Object.entries(prices)){
+        if(!p||typeof p!=='object'||p.available===false||p.is_open===false||p.suspended===true)continue;
+        const pid=entainId(p.entrant_id??p.entrantId??p.selection_id??p.selectionId);
+        const pmid=entainId(p.market_id??p.marketId??p.market?.id??p.market);
+        if(pid&&pid!==eid&&pid!==row.key)continue;
+        if(pmid&&!marketIds.has(pmid))continue;
+        const segments=String(priceKey).split(/[:|/]/);
+        const keyTied=priceKey===eid||priceKey===row.key||segments.includes(eid)||segments.includes(row.key);
+        // Only accept market-specific references, or an exact entrant-keyed quote
+        // when we already know the entrant belongs to this market.
+        const explicit=Boolean(pid&&pmid&&marketIds.has(pmid));
+        const quoteLinked=explicit||(keyTied&&(explicitlyLinked.has(eid)||explicitlyLinked.has(row.key)||Boolean(pmid)));
+        if(!quoteLinked)continue;
+        const price=entainDecimal(p);
+        if(price)valid.push(price);
+      }
+      const attached=entainDecimal(row.entrant.price??row.entrant.odds);
+      if(attached&&explicitlyLinked.has(row.key))valid.push(attached);
+      if(valid.length)selections.push({name,role:selectionRole,odds:Math.max(...valid)});
     }
     const distinct=new Set(selections.map(x=>x.role));
     if(distinct.size!==selections.length||!distinct.has('home')||!distinct.has('away'))continue;
-    // A regular-time soccer match winner must include the draw.
     if(sport==='soccer'&&!distinct.has('draw'))continue;
     if(selections.length!==2&&selections.length!==3)continue;
-    // A full-market overround wildly below 100% strongly suggests
-    // mismatched prices or incomplete settlement. Fail closed.
     const overround=selections.reduce((sum,x)=>sum+1/x.odds,0);
     if(!Number.isFinite(overround)||overround<0.92)continue;
-    out.push(...selections);
-    break;
+    return selections;
   }
-  return out;
+  return [];
 }
 
 async function entainBook(host,book,anchors,sport){
