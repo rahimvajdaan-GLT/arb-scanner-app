@@ -1,11 +1,7 @@
 name: Probe production odds
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'api/arbitrage.js'
-      - '.github/workflows/probe-odds.yml'
+  workflow_dispatch:
 
 jobs:
   probe:
@@ -13,7 +9,7 @@ jobs:
     steps:
       - name: Allow Vercel deployment to settle
         run: sleep 3
-      - name: Probe v6 eight-book coverage
+      - name: Optional live-feed coverage check
         run: |
           echo '=== SOCCER ==='
           curl -sS --fail-with-body 'https://arb-scanner-app.vercel.app/api/arbitrage?sport_key=soccer&market_mode=all&debug=1'; echo
