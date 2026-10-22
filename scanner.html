@@ -26,7 +26,8 @@ window.addEventListener('load',()=>{const b=document.getElementById('scanLiveBtn
   const id=++serial;
   await new Promise(resolve=>setTimeout(resolve,2300));
   if(id!==serial)return;
-  if(metric&&metric.textContent!=='0'){diag.style.display='none';return;}
+  const hasPositive=metric&&metric.textContent!=='0';
+  if(hasPositive)diag.style.display='none';
   const q=new URLSearchParams({market_mode:market?.value||'all',debug:'1',t:String(Date.now())});
   if(sport?.value)q.set('sport_key',sport.value);
   const lines=[];
@@ -115,6 +116,7 @@ window.addEventListener('load',()=>{const b=document.getElementById('scanLiveBtn
      if(detail)detail.textContent='Matching bookmaker prices were checked. Prices may change; this does not mean there are no upcoming games.';
    }
   }catch(e){if(id!==serial)return;lines.push('Live diagnostic failed: '+String(e?.message||e));}
+  if(hasPositive)return;
   diag.style.display='block';diag.replaceChildren();
   const heading=document.createElement('strong');heading.textContent='Feed diagnostic';diag.append(heading);
   for(const line of lines){const p=document.createElement('div');p.textContent=line;p.style.overflowWrap='anywhere';if(line.includes('ERROR:')||line.startsWith('Live diagnostic failed'))p.style.color='#a11b1b';diag.append(p);}
