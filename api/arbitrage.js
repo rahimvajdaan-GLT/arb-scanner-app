@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v36-parser-diagnostics';
+const ENGINE='au-openbooks-v37-rate-limit-protection';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=30*60*1000;
 const BASE_HEADERS={
@@ -32,7 +32,7 @@ async function getJson(url,extra={},timeout=15000){
     const text=await r.text();
     if(r.status===429){
       const retry=Number(r.headers.get('retry-after'));
-      hostCooldown.set(host,Date.now()+(Number.isFinite(retry)&&retry>0?Math.min(retry*1000,3600000):15*60*1000));
+      hostCooldown.set(host,Date.now()+(Number.isFinite(retry)&&retry>0?Math.min(retry*1000,3600000):60*60*1000));
       throw new Error('HTTP 429 '+host+' (rate-limited; retry later)');
     }
     if(!r.ok) throw new Error(`HTTP ${r.status} ${new URL(url).hostname}${text?`: ${text.slice(0,160)}`:''}`);
@@ -101,7 +101,7 @@ async function pointsBet(){
   const h={'Origin':'https://pointsbet.com.au','Referer':'https://pointsbet.com.au/'};
   const feed=await getJson('https://api.au.pointsbet.com/api/v2/events/nextup?v2Limit=80',h);
   const rows=Array.isArray(feed?.events)?feed.events:(Array.isArray(feed)?feed:[]);
-  const upcoming=rows.filter(e=>e?.key&&e?.isLive!==true&&parseMs(e?.startsAt)>Date.now()+FUTURE_BUFFER_MS).slice(0,30);
+  const upcoming=rows.filter(e=>e?.key&&e?.isLive!==true&&parseMs(e?.startsAt)>Date.now()+FUTURE_BUFFER_MS ).slice(0,6);
   const details=await Promise.allSettled(upcoming.map(head=>getJson(`https://api.au.pointsbet.com/api/mes/v3/events/${encodeURIComponent(head.key)}`,h,16000).then(detail=>({head,detail}))));
   const out=[];
   for(const r of details){
@@ -195,7 +195,7 @@ async function entainBook(host,book,anchors,sport){
   // Full-source discovery is expensive; cycle category groups over time.
   // A filtered sport scans that specific supported category immediately.
   const slot=Math.floor(Date.now()/(30*60*1000));
-  const selected=sport?metas.slice(0,3):[0,1,2].map(i=>metas[(slot*3+i)%metas.length]);
+  const selected=sport?metas.slice(0,1):metas.length?[metas[slot%metas.length]]:[];
   const lists=[];
   for(const meta of selected){
     if(Date.now()>deadline-18000)break;
@@ -219,7 +219,7 @@ async function entainBook(host,book,anchors,sport){
       if(time&&parseMs(time)>Date.now()+FUTURE_BUFFER_MS)listed.push({meta,e,ta,time,id:String(e?.id??e?.event_id??e?.eventId??'')});
     }
   }
-  const dedup=[...new Map(listed.filter(x=>x.id).map(x=>[x.id,x])).values()].sort((a,b)=>parseMs(a.time)-parseMs(b.time)).slice(0,8);
+  const dedup=[...new Map(listed.filter(x=>x.id).map(x=>[x.id,x])).values()].sort((a,b)=>parseMs(a.time)-parseMs(b.time)).slice(0,2);
   const cards=[];
   // Two concurrent detail reads improve reliability while avoiding a request burst.
   // Stop scheduling requests before the serverless function approaches its limit.
@@ -474,7 +474,7 @@ export default async function handler(req,res){
   }
   try{
     const data=await item.promise;
-    res.setHeader('Cache-Control','public, max-age=0, s-maxage=90');
+    res.setHeader('Cache-Control','public, max-age=0, s-maxage=300');
     return res.status(200).json(debug?data:data.results);
   }catch(e){
     scanCache.delete(key);
