@@ -214,7 +214,7 @@ function renderLive(events, scanTime = latestScanTime || new Date()) {
     return;
   }
 
-  liveEls.message.textContent = `${trueArbs.length} pre-match positive quoted-price opportunity${trueArbs.length === 1 ? '' : 'ies'} found · ${board.length} shown`;
+  liveEls.message.textContent = `${trueArbs.length} pre-match positive quoted-price opportunit${trueArbs.length === 1 ? 'y' : 'ies'} found · ${board.length} shown`;
 
   board.forEach(({ event, plan }, index) => {
     const startMs = parseStartMs(event.commence_time);
