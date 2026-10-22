@@ -1,6 +1,6 @@
-const ENGINE='au-openbooks-v30-stable-comparisons';
+const ENGINE='au-openbooks-v31-audited-matching';
 const FUTURE_BUFFER_MS=10*60*1000;
-const MATCH_WINDOW_MS=90*60*1000;
+const MATCH_WINDOW_MS=30*60*1000;
 const BASE_HEADERS={
   'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36',
   'Accept':'application/json, text/plain, */*',
@@ -17,8 +17,8 @@ const ENTAIN_CATEGORIES=[
   {key:'tennis',id:'a0b910b8-85f0-4f6e-821d-c9fd9e3bdf93'}
 ];
 const ALIASES=new Map([
-  ['aussierules_afl','afl'],['basketball_nba','basketball'],['icehockey_nhl','nhl'],
-  ['soccer_epl','soccer'],['americanfootball_nfl','nfl'],['tennis_atp','tennis'],['tennis_wta','tennis']
+  ['aussierules_afl','afl'],['nba','basketball'],['nbl','basketball'],['ncaab','basketball'],['basketball_nba','basketball'],['icehockey_nhl','nhl'],['mlb','baseball'],
+  ['soccer_epl','soccer'],['soccer_mls','soccer'],['ncaaf','nfl'],['americanfootball_nfl','nfl'],['tennis_atp','tennis'],['tennis_wta','tennis']
 ]);
 
 const hostCooldown=new Map();
@@ -49,7 +49,21 @@ function parseMs(v){
 function firstTime(...vals){for(const v of vals){const t=parseMs(v);if(Number.isFinite(t))return new Date(t).toISOString()}return null}
 function objValues(v){if(Array.isArray(v))return v;if(v&&typeof v==='object')return Object.values(v);return[]}
 function norm(v){return String(v||'').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|cf|afc|sc|club|the)\b/g,' ').replace(/\bunited\b/g,'utd').replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ')}
-function same(a,b){const x=norm(a),y=norm(b);if(!x||!y)return false;if(x===y||x.replace(/\s/g,'')===y.replace(/\s/g,''))return true;if(x.length>4&&y.length>4&&(x.includes(y)||y.includes(x)))return true;const A=new Set(x.split(' ')),B=new Set(y.split(' '));return [...A].filter(z=>B.has(z)).length/Math.max(1,Math.min(A.size,B.size))>=.6}
+function same(a,b){
+ const x=norm(a).replace(/^ny /,'new york ').replace(/^la /,'los angeles ').replace(/^man /,'manchester ');
+ const y=norm(b).replace(/^ny /,'new york ').replace(/^la /,'los angeles ').replace(/^man /,'manchester ');
+ if(!x||!y)return false;
+ if(x===y||x.replace(/\s/g,'')===y.replace(/\s/g,''))return true;
+ const A=x.split(' '),B=y.split(' ');
+ // City-only overlap must never merge rivals such as NY Jets and NY Giants.
+ if(A.at(-1)!==B.at(-1))return false;
+ const overlap=A.filter(t=>B.includes(t)).length;
+ if(Math.min(A.length,B.length)===1){
+   const token=A.length===1?A[0]:B[0];
+   return token.length>=5&&!['united','city','rangers','wanderers','athletic','town','saints','fc'].includes(token);
+ }
+ return overlap/Math.max(A.length,B.length)>=0.65;
+}
 function teams(name){const s=String(name||'').trim();const m=s.match(/^(.+?)\s+(?:vs\.?|v|@|at)\s+(.+)$/i);if(!m)return null;const isAway=/\s(?:@|at)\s/i.test(s);return isAway?{home:m[2].trim(),away:m[1].trim()}:{home:m[1].trim(),away:m[2].trim()}}
 function dec(v){const n=Number(v);return Number.isFinite(n)&&n>1?n:null}
 function role(name,h,a,homeAway){if(homeAway==='HOME')return'home';if(homeAway==='AWAY')return'away';if(same(name,h))return'home';if(same(name,a))return'away';if(/^(draw|tie)$/i.test(String(name||'')))return'draw';return null}
@@ -146,7 +160,10 @@ async function entainBook(host,book,anchors,sport){
   const headers={'Content-Type':'application/json','Origin':book==='Neds'?'https://www.neds.com.au':'https://www.ladbrokes.com.au','Referer':book==='Neds'?'https://www.neds.com.au/':'https://www.ladbrokes.com.au/'};
   const listed=[];const categoryErrors=[];
   // Use a small, sequential discovery batch to avoid request bursts.
-  const selected=metas.slice(0,3);
+  // Full-source discovery is expensive; cycle category groups over time.
+  // A filtered sport scans that specific supported category immediately.
+  const slot=Math.floor(Date.now()/(30*60*1000));
+  const selected=sport?metas.slice(0,3):[0,1,2].map(i=>metas[(slot*3+i)%metas.length]);
   const lists=[];
   for(const meta of selected){
     try{
@@ -185,7 +202,7 @@ async function entainBook(host,book,anchors,sport){
     if(r.status==='rejected'){cardFailures++;continue}
     const{x,card}=r.value;const sels=entainCardSelections(card,x.ta.home,x.ta.away);const item=eventObj(x.meta.key,x.ta.home,x.ta.away,x.time,book,sels,book.toLowerCase());if(item)events.push(item);
   }
-  return{events,listed:listed.length,cards:cards.length,cardFailures,categoryErrors};
+  return{events,listed:listed.length,cards:cards.length,cardFailures,categoryErrors,categories:selected.map(x=>x.key)};
 }
 
 function merge(events){
@@ -342,9 +359,9 @@ async function scan(sport){
       entainBook('api.neds.com.au','Neds',pe,sport),
       entainBook('api.ladbrokes.com.au','Ladbrokes AU',pe,sport)
     ]);
-    if(nr.status==='fulfilled'){neds=nr.value;providers.push({provider:'Neds',ok:true,events:neds.events.length,listed:neds.listed,cards:neds.cards,card_failures:neds.cardFailures,error:neds.categoryErrors.length?neds.categoryErrors.join(' | '):undefined})}
+    if(nr.status==='fulfilled'){neds=nr.value;providers.push({provider:'Neds',ok:true,events:neds.events.length,listed:neds.listed,cards:neds.cards,card_failures:neds.cardFailures,categories:neds.categories||[],error:neds.categoryErrors.length?neds.categoryErrors.join(' | '):undefined})}
     else providers.push({provider:'Neds',ok:false,events:0,error:String(nr.reason?.message||nr.reason).slice(0,200)});
-    if(lr.status==='fulfilled'){lads=lr.value;providers.push({provider:'Ladbrokes AU',ok:true,events:lads.events.length,listed:lads.listed,cards:lads.cards,card_failures:lads.cardFailures,error:lads.categoryErrors.length?lads.categoryErrors.join(' | '):undefined})}
+    if(lr.status==='fulfilled'){lads=lr.value;providers.push({provider:'Ladbrokes AU',ok:true,events:lads.events.length,listed:lads.listed,cards:lads.cards,card_failures:lads.cardFailures,categories:lads.categories||[],error:lads.categoryErrors.length?lads.categoryErrors.join(' | '):undefined})}
     else providers.push({provider:'Ladbrokes AU',ok:false,events:0,error:String(lr.reason?.message||lr.reason).slice(0,200)});
   }
 
