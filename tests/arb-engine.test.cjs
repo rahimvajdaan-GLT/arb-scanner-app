@@ -8,7 +8,7 @@ const path=require('node:path');
 const js=fs.readFileSync(path.join(__dirname,'../api/arbitrage.js'),'utf8')
  .replace('export default async function handler','async function handler');
 const env={console,Date,URL,URLSearchParams,setTimeout,clearTimeout,process:{env:{}}};
-vm.runInNewContext(js+'\nthis.testEngine={eventObj,merge,priceAudit,arb,bookmakerName,same};',env,{filename:'api/arbitrage.js'});
+vm.runInNewContext(js+'\nthis.testEngine={eventObj,merge,priceAudit,arb,bookmakerName,same,entainCardSelections};',env,{filename:'api/arbitrage.js'});
 const E=env.testEngine;
 const future=new Date(Date.now()+24*60*60*1000).toISOString();
 function fixture(book,home,away,values,sport='basketball'){
@@ -82,6 +82,23 @@ test('SockOdds HTTP 429 honors Retry-After without repeated calls to the same fu
  assert.equal(b.error,a.error);
  assert.equal(scope.calls,1);
  assert.ok(Date.parse(a.retry_at)>Date.now());
+});
+test('Entain market identifiers prevent half-time and unrelated price leakage',()=>{
+ const card={
+  markets:{half:{id:'half',name:'1st Half Match Betting',entrant_ids:['hh','ha']},full:{id:'full',name:'Match Betting',entrant_ids:['h','d','a']}},
+  entrants:{hh:{id:'hh',name:'Arsenal'},ha:{id:'ha',name:'Chelsea'},h:{id:'h',name:'Arsenal'},d:{id:'d',name:'Draw'},a:{id:'a',name:'Chelsea'}},
+  prices:{
+   'half:hh':{market_id:'half',entrant_id:'hh',odds:{numerator:20,denominator:1}},
+   'half:ha':{market_id:'half',entrant_id:'ha',odds:{numerator:20,denominator:1}},
+   'full:h':{market_id:'full',entrant_id:'h',odds:{numerator:11,denominator:10}},
+   'full:d':{market_id:'full',entrant_id:'d',odds:{numerator:22,denominator:10}},
+   'full:a':{market_id:'full',entrant_id:'a',odds:{numerator:19,denominator:10}},
+  }
+ };
+ const prices=E.entainCardSelections(card,'Arsenal','Chelsea','soccer');
+ assert.equal(prices.length,3);
+ assert.ok(prices.every(p=>p.odds<10));
+ assert.equal(E.entainCardSelections({...card,markets:{half:card.markets.half}},'Arsenal','Chelsea','soccer').length,0);
 });
 test('frontend has one comparison request per scan, with same payload shared to board',()=>{
  const front=fs.readFileSync(path.join(__dirname,'../live.js'),'utf8');
