@@ -298,9 +298,10 @@ async function scanLive() {
   if (sport) params.set('sport_key', sport);
   params.set('market_mode', liveEls.market.value || 'all');
   params.set('min_profit_pct', '0');
+  params.set('debug', '1');
 
   try {
-    const response = await fetch(`/api/arbitrage?${params.toString()}&t=${Date.now()}`, { cache: 'no-store', signal: activeController.signal });
+    const response = await fetch(`/api/arbitrage?${params.toString()}`, { cache: 'no-store', signal: activeController.signal });
     const contentType = response.headers.get('content-type') || '';
     const data = contentType.includes('application/json') ? await response.json() : { error: await response.text() };
     if (!response.ok) {
@@ -308,13 +309,15 @@ async function scanLive() {
       throw new Error(`${data.error || 'Live scan failed'}${detail ? ` — ${detail}` : ''}`);
     }
     if (serial !== requestSerial) return;
-    latestEvents = Array.isArray(data) ? data.filter(isFutureEvent) : [];
+    latestEvents = Array.isArray(data.results) ? data.results.filter(isFutureEvent) : [];
     latestScanTime = new Date();
     renderLive(latestEvents, latestScanTime);
+    window.dispatchEvent(new CustomEvent('arb:scan', {detail:data}));
     liveEls.status.textContent = '● Live · Pre-match only';
   } catch (error) {
     if (error.name === 'AbortError') return;
     liveEls.message.textContent = error.message;
+    window.dispatchEvent(new CustomEvent('arb:scan-error', {detail:error.message}));
     liveEls.status.textContent = '● Error';
     liveEls.results.innerHTML = `<div class="error-panel"><strong>Unable to complete scan</strong><span>${esc(error.message)}</span></div>`;
   } finally {
