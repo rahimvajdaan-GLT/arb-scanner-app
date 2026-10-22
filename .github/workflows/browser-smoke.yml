@@ -52,7 +52,7 @@ jobs:
               }));
               await page.screenshot({path:'audit-screenshots/'+setting.name+'.png',fullPage:true});
               console.log(setting.name,JSON.stringify({http:response.status(),...result,errors}));
-              const parsed=Number(result.diagnostic?.match(/Games parsed: (\\d+)/)?.[1]||0);
+              const parsed=Number(result.diagnostic?.match(/Games parsed: (\d+)/)?.[1]||0);
               if(response.status()!==200||errors.length||result.maxWidth>result.viewportWidth+16||result.sports<7)failed=true;
               if(parsed>0&&result.comparisonCards===0){console.error('Odds arrived but comparison and fixture board stayed empty');failed=true}
               await page.close();
