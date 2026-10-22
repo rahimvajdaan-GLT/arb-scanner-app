@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en-AU"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Australian Bookmaker Connections | Top Notch Arb</title>
-<meta name="description" content="Explore ten Australian bookmaker sources and see which odds feeds are integrated, limited or awaiting connection to Top Notch Arb.">
+<meta name="description" content="Compare ten Australian bookmaker connections and understand which direct feeds or opt-in odds aggregators actually supply prices.">
 <link rel="canonical" href="https://arb-scanner-app.vercel.app/bookmakers.html">
 <link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/bright.css"><link rel="stylesheet" href="/site.css">
 <style>
@@ -28,23 +28,29 @@
 <header class="site-header"><nav class="site-nav"><a class="site-brand" href="/"><span class="site-logo">TNA</span><span>Top Notch Arb</span></a><div class="nav-links"><a href="/scanner.html">Scanner</a><a href="/bookmakers.html" aria-current="page">Bookmakers</a><a href="/how-it-works.html">How it works</a><a href="/responsible-gambling.html">Responsible use</a></div><div class="nav-actions"><a class="btn btn-secondary" href="/login.html">Log in</a></div></nav></header>
 <main class="book-wrap">
 <section class="book-hero"><div class="book-tag">Australian market coverage</div><h1>Bookmaker connections</h1><p>We're building wider odds coverage so Top Notch Arb can compare more upcoming fixtures. The labels below describe <strong>integration status</strong>, not proof that live odds are currently available. Unconnected bookmakers never contribute fabricated odds or profit figures.</p><a class="book-cta" href="/scanner.html">Open live scanner →</a></section>
-<div class="book-summary"><div class="book-stat"><strong>10</strong><span>Bookmakers on the roadmap</span></div><div class="book-stat"><strong>3</strong><span>Feed integrations attempted</span></div><div class="book-stat"><strong>7</strong><span>Additional connections planned</span></div></div>
+<div class="book-summary"><div class="book-stat"><strong>10</strong><span>Bookmakers tracked in this directory</span></div><div class="book-stat"><strong>3</strong><span>Direct bookmaker connectors in code</span></div><div class="book-stat"><strong>2</strong><span>Aggregator connectors, subject to API access</span></div></div>
+<section class="book-note" style="background:#fff;border:1px solid #dfe7f2">
+<strong>Expanded odds coverage — optional Krok connector ready</strong>
+<p>Krok Odds publishes a multi-bookmaker direct-scrape feed for Sportsbet, TAB, Unibet, BetRight, PointsBet, Ladbrokes and other operators. The scanner can now read compatible prices from that feed when you provide an authorized Krok API key in Vercel, choose a sport and enable <strong>Extra bookmaker feed</strong>. No bookmaker is counted unless it actually supplies a valid quote.</p>
+<p><strong>Free tier:</strong> advertised at 50 API requests per month. The extra feed is manual-only; repeated scans consume quota. <a href="https://krokodds.com.au/api-access" target="_blank" rel="noopener noreferrer">Get a free Krok API key</a>, then add it as the server-side Vercel environment variable <code>KROK_ODDS_API_KEY</code> (Production). Do not paste API secrets into the website or GitHub.</p>
+<p><strong>Connection status:</strong> code ready — <em>not live until a key is configured and valid prices return.</em> Existing SockOdds is rate-limited and subject to its own plan restrictions.</p>
+</section>
 <h2 class="book-section-title">Current integrations</h2>
 <div class="book-grid">
 <article class="book-card"><div><h2>PointsBet AU</h2><p>Integrated into the current match-winner scanner. Availability varies by fixture and server response.</p></div><span class="book-state integrated">Integrated</span></article>
 <article class="book-card"><div><h2>Neds</h2><p>Feed integrated, but requests have returned HTTP 429 rate limits. Odds cannot be assumed available.</p></div><span class="book-state limited">Rate-limited</span></article>
 <article class="book-card"><div><h2>Ladbrokes AU</h2><p>Feed integrated, but requests have returned HTTP 429 rate limits. Odds cannot be assumed available.</p></div><span class="book-state limited">Rate-limited</span></article>
 </div>
-<h2 class="book-section-title">Planned connections</h2>
+<h2 class="book-section-title">Additional bookmakers — access varies</h2>
 <div class="book-grid">
-<article class="book-card"><div><h2>Sportsbet</h2><p>Planned. Earlier direct requests were access-denied; an authorized feed is needed.</p></div><span class="book-state">Not connected</span></article>
-<article class="book-card"><div><h2>TAB</h2><p>Planned. Current scanner does not receive verified TAB odds.</p></div><span class="book-state">Not connected</span></article>
-<article class="book-card"><div><h2>bet365 Australia</h2><p>Planned. Australian market data connection has not been configured.</p></div><span class="book-state">Not connected</span></article>
-<article class="book-card"><div><h2>Unibet Australia</h2><p>Planned. Bookmaker prices are not included in current calculations.</p></div><span class="book-state">Not connected</span></article>
-<article class="book-card"><div><h2>Betfair Exchange</h2><p>Planned. Official API access and commission-adjusted calculations are required.</p></div><span class="book-state">Not connected</span></article>
-<article class="book-card"><div><h2>TABtouch</h2><p>Planned. A compliant, reliable odds feed is needed before inclusion.</p></div><span class="book-state">Not connected</span></article>
-<article class="book-card"><div><h2>Bet Right</h2><p>Planned. No verified active feed is connected to the scanner.</p></div><span class="book-state">Not connected</span></article>
+<article class="book-card"><div><h2>Sportsbet</h2><p>May be supplied by an authorized multi-bookmaker feed when configured. No separate direct connector.</p></div><span class="book-state">Requires feed</span></article>
+<article class="book-card"><div><h2>TAB</h2><p>Planned. Available through SockOdds or Krok only if the configured plan returns valid TAB prices.</p></div><span class="book-state">Requires feed</span></article>
+<article class="book-card"><div><h2>bet365 Australia</h2><p>No direct authenticated connection. An aggregator may supply this bookmaker if your plan permits.</p></div><span class="book-state">Requires feed</span></article>
+<article class="book-card"><div><h2>Unibet Australia</h2><p>May be available through the optional aggregator. Live odds must be confirmed before use.</p></div><span class="book-state">Requires feed</span></article>
+<article class="book-card"><div><h2>Betfair Exchange</h2><p>Exchange odds are not included in arbitrage calculations until trading fees and liquidity can be verified.</p></div><span class="book-state">Requires feed</span></article>
+<article class="book-card"><div><h2>TABtouch</h2><p>May be supplied by an authorized aggregator. No independent direct feed is configured.</p></div><span class="book-state">Requires feed</span></article>
+<article class="book-card"><div><h2>Bet Right</h2><p>May be supplied by the optional aggregator after a valid feed and key are configured.</p></div><span class="book-state">Requires feed</span></article>
 </div>
 <div class="book-note"><strong>How to interpret profit signals:</strong> Only real pre-match prices from available feeds can be used. A positive inverse-odds calculation is a theoretical quoted-odds opportunity—not a guarantee of profit after timing, fees, betting limits, cancellations, and settlement rules. A missing feed is not the same as no opportunities.</div>
-<div class="book-footer">Top Notch Arb · Australian bookmaker comparison roadmap</div>
+<div class="book-footer">Top Notch Arb · Connections and availability</div>
 </main></body></html>
