@@ -40,6 +40,7 @@ window.addEventListener('load',()=>{const b=document.getElementById('scanLiveBtn
    for(const p of providers){
     let message=p.provider+': '+(p.events??0)+' usable games';
     if(p.listed!==undefined)message+=' | listed '+p.listed;
+    if(p.league)message+=' | league '+p.league;
     if(p.candidates!==undefined)message+=' | candidates '+p.candidates;
     if(p.cards!==undefined)message+=' | cards '+p.cards;
     if(p.card_failures!==undefined)message+=' | card failures '+p.card_failures;
