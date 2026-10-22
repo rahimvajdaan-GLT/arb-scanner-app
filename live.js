@@ -6,6 +6,7 @@ const liveEls = {
   books: document.getElementById('liveBooks'),
   autoRefresh: document.getElementById('autoRefresh'),
   extraFeed: document.getElementById('liveExtraFeed'),
+  oddsApi: document.getElementById('liveOddsApi'),
   lastUpdated: document.getElementById('lastUpdated'),
   message: document.getElementById('liveMessage'),
   results: document.getElementById('liveResults'),
@@ -313,6 +314,7 @@ async function scanLive() {
   const sport = liveEls.sport.value.trim();
   if (sport) params.set('sport_key', sport);
   if (liveEls.extraFeed?.checked) params.set('include_krok', '1');
+  if (liveEls.oddsApi?.checked) params.set('include_odds_api', '1');
   params.set('market_mode', liveEls.market.value || 'all');
   params.set('min_profit_pct', '0');
   params.set('debug', '1');
@@ -377,7 +379,7 @@ async function scanLive() {
 function configureAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = null;
-  if (liveEls.autoRefresh.checked && !liveEls.extraFeed?.checked) {
+  if (liveEls.autoRefresh.checked && !liveEls.extraFeed?.checked && !liveEls.oddsApi?.checked) {
     refreshTimer = setInterval(scanLive, 900000);
   }
 }
@@ -392,9 +394,21 @@ liveEls.scanBtn.addEventListener('click', scanLive);
 liveEls.autoRefresh.addEventListener('change', configureAutoRefresh);
 if (liveEls.extraFeed) liveEls.extraFeed.addEventListener('change', ()=>{
   // Protect free API call allowance: optional feed always requires manual scans.
-  if (liveEls.extraFeed.checked) liveEls.autoRefresh.checked = false;
+  if (liveEls.extraFeed.checked) {
+    liveEls.autoRefresh.checked = false;
+    if (liveEls.oddsApi) liveEls.oddsApi.checked = false;
+  }
   configureAutoRefresh();
   liveEls.message.textContent = liveEls.extraFeed.checked ? 'Choose one sport and click Scan. Extra feed uses your Krok free API calls when configured.' : 'Extra bookmaker feed disabled. Existing sources remain available.';
+});
+if (liveEls.oddsApi) liveEls.oddsApi.addEventListener('change', ()=>{
+  // Both optional feeds require manual scans to protect their free quotas.
+  if(liveEls.oddsApi.checked){
+    liveEls.autoRefresh.checked=false;
+    if(liveEls.extraFeed) liveEls.extraFeed.checked=false;
+  }
+  configureAutoRefresh();
+  liveEls.message.textContent=liveEls.oddsApi.checked?'Choose a supported sport and scan once. The Odds API requires its own server-side free key.':'The Odds API extra feed disabled.';
 });
 liveEls.stake.addEventListener('input', renderCached);
 liveEls.books.addEventListener('input', renderCached);
