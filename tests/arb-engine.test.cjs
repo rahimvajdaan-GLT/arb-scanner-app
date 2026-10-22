@@ -78,7 +78,7 @@ test('SockOdds HTTP 429 honors Retry-After without repeated calls to the same fu
  scope.fetch=async()=>{scope.calls++;return {status:429,ok:false,headers:{get:k=>k==='retry-after'?'120':null}}};
  vm.runInNewContext(js+'\nthis.sockOdds=sockOdds',scope);
  const a=await scope.sockOdds(),b=await scope.sockOdds();
- assert.match(a.error,/minute request limit/);
+ assert.match(a.error,/rate limit/);
  assert.equal(b.error,a.error);
  assert.equal(scope.calls,1);
  assert.ok(Date.parse(a.retry_at)>Date.now());
