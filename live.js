@@ -214,7 +214,7 @@ function renderLive(events, scanTime = latestScanTime || new Date()) {
     return;
   }
 
-  liveEls.message.textContent = `${trueArbs.length} pre-match positive true arb${trueArbs.length === 1 ? '' : 's'} found · ${board.length} shown`;
+  liveEls.message.textContent = `${trueArbs.length} pre-match positive quoted-price opportunity${trueArbs.length === 1 ? '' : 'ies'} found · ${board.length} shown`;
 
   board.forEach(({ event, plan }, index) => {
     const startMs = parseStartMs(event.commence_time);
@@ -235,7 +235,7 @@ function renderLive(events, scanTime = latestScanTime || new Date()) {
             <div class="event-meta">
               <span class="sport-chip">${esc(String(event.sport_key || 'SPORT').toUpperCase())}</span>
               <span class="market-chip">${esc(market)}</span>
-              <span class="guarantee-chip">PRE-MATCH TRUE ARB</span>
+              <span class="guarantee-chip">THEORETICAL ARB · VERIFY PRICES</span>
               <span>${esc(startsText)}</span>
             </div>
             <h3>${esc(event.home_team || 'Home')} <span>vs</span> ${esc(event.away_team || 'Away')}</h3>
@@ -313,7 +313,10 @@ async function scanLive() {
     latestScanTime = new Date();
     renderLive(latestEvents, latestScanTime);
     window.dispatchEvent(new CustomEvent('arb:scan', {detail:data}));
-    liveEls.status.textContent = '● Live · Pre-match only';
+    const feeds=Array.isArray(data.providers)?data.providers:[];
+    const working=feeds.filter(p=>Number(p.events)>0);
+    const errors=feeds.filter(p=>p.error);
+    liveEls.status.textContent=!working.length?'● Odds sources unavailable':errors.length?'● Partial odds coverage':'● Live prices · Pre-match';
   } catch (error) {
     if (error.name === 'AbortError') return;
     liveEls.message.textContent = error.message;
@@ -332,8 +335,8 @@ function configureAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = null;
   if (liveEls.autoRefresh.checked) {
-    if (!latestEvents.length) scanLive();
-    refreshTimer = setInterval(scanLive, 60000);
+    // Manual first scan already runs on load; no second request on toggle.
+    refreshTimer = setInterval(scanLive, 300000);
   }
 }
 
