@@ -318,9 +318,10 @@ async function scan(sport){
     const counts=[...b.outcomeCounts.values()];
     const roles=counts[0]===3?['home','draw','away']:['home','away'];
     let reason;
-    if(counts.some(c=>c!==counts[0])||![2,3].includes(counts[0]))reason='mixed_outcome_counts';
-    else if(roles.some(role=>!b.offers.some(o=>o.role===role)))reason='incomplete_outcomes';
-    else if(roles.some(role=>!b.offers.some(o=>o.role===role&&Number.isFinite(o.odds)&&o.odds>1)))reason='invalid_prices';
+    const groups=[2,3].filter(count=>[...b.outcomeCounts.values()].filter(n=>n===count).length>=2);
+    if(!groups.length)reason='mixed_outcome_counts';
+    else if(groups.every(count=>(count===3?['home','draw','away']:['home','away']).some(role=>!b.offers.some(o=>o.role===role&&b.outcomeCounts.get(o.book)===count))))reason='incomplete_outcomes';
+    else if(groups.every(count=>(count===3?['home','draw','away']:['home','away']).some(role=>!b.offers.some(o=>o.role===role&&b.outcomeCounts.get(o.book)===count&&Number.isFinite(o.odds)&&o.odds>1))))reason='invalid_prices';
     else reason='comparable';
     auditReasons[reason]++;
     if(reason!=='comparable'&&rejectedExamples.length<3)rejectedExamples.push({fixture:b.home+' vs '+b.away,reason,books:[...b.books],outcomes:[...b.outcomeCounts].map(([book,count])=>({book,count}))});
