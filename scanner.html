@@ -106,6 +106,7 @@
     if(p.rejected_card_samples?.length){
       for(const card of p.rejected_card_samples){
         lines.push('  '+p.provider+' rejected '+(card.sport||'')+' card: '+card.reason+' | markets '+card.market_count+' | supported '+card.supported_moneyline_markets+' | entrants '+card.entrant_count+' | prices '+card.price_count+' | named markets '+(card.market_names||[]).join(', '));
+        lines.push('  '+p.provider+' selection links: '+(card.linked_selection_ids||0)+' explicit IDs | '+(card.entrant_market_link_count||0)+' entrants with market ID | market fields '+(card.match_market_fields||[]).join(', ')+' | entrant fields '+(card.sample_entrant_fields||[]).join(', ')+' | price fields '+(card.sample_price_fields||[]).join(', '));
       }
     }
     if(p.schema_sample?.market_count===0)lines.push('  '+p.provider+' event payload keys: '+(p.schema_sample.payload_keys||[]).join(', '));
