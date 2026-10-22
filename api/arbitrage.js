@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v37-rate-limit-protection';
+const ENGINE='au-openbooks-v38-entain-market-audit';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=30*60*1000;
 const BASE_HEADERS={
@@ -120,8 +120,30 @@ async function pointsBet(){
 
 function entainDecimal(x){
   if(x==null)return null;
-  const direct=dec(x?.decimal??x?.decimal_odds??x?.price??x?.returnWin);if(direct)return direct;
-  const q=x?.odds||x;const n=Number(q?.numerator??q?.num),d=Number(q?.denominator??q?.den);return Number.isFinite(n)&&Number.isFinite(d)&&d?1+n/d:null;
+  const direct=dec(typeof x==='number'?x:(x?.decimal??x?.decimal_odds??x?.decimalOdds??x?.decimal_price??x?.returnWin??x?.odds?.decimal??x?.odds?.decimal_odds??x?.price));
+  if(direct)return direct;
+  // Entain has served both fractional-odds objects and numeric decimal odds.
+  const scalar=dec(x?.odds);if(scalar)return scalar;
+  const q=x?.odds||x;const n=Number(q?.numerator??q?.num),d=Number(q?.denominator??q?.den);
+  return Number.isFinite(n)&&Number.isFinite(d)&&d>0&&n>=0?1+n/d:null;
+}
+function entainCardPayload(card){
+  const roots=[card,card?.data,card?.event,card?.data?.event,card?.data?.data,card?.result];
+  if(Array.isArray(card))roots.push(card[0]);
+  for(const root of roots){
+    if(root&&typeof root==='object'&&root.markets&&typeof root.markets==='object'&&Object.keys(root.markets).length)return root;
+  }
+  return card||{};
+}
+function entainMarketName(m){return String(m?.name??m?.display_name??m?.displayName??'').trim()}
+function entainFullMatchMarket(m,sport){
+  const name=entainMarketName(m);
+  const full=/^(match betting|head to head|head-to-head|head2head|h2h|match result|match winner|match odds|moneyline|money line|full time result|full-time result|full match result|game winner|game betting|game result)$/i.test(name);
+  // Generic 'winner' is too ambiguous for soccer (qualification versus 90 min).
+  const twoWayGeneric=sport!=='soccer'&&/^(winner|to win)$/i.test(name);
+  const period=String(m?.period?.name??m?.period??'').toLowerCase();
+  const partial=/first|second|half|quarter|period [1-3]|regulation|60 min|1h|2h|set [1-5]/i;
+  return (full||twoWayGeneric)&&!partial.test(name)&&(!period||!partial.test(period));
 }
 function entainListEvents(payload){return objValues(payload?.events?.length!==undefined?payload.events:(payload?.events||payload?.data?.events))}
 function entainEventTime(e){return firstTime(e?.advertised_start,e?.advertised_start_time,e?.start_time,e?.startTime,e?.startsAt)}
@@ -131,6 +153,7 @@ function sameFixture(a,b){
   const at=parseMs(a.time),bt=parseMs(b.time);return !Number.isFinite(at)||!Number.isFinite(bt)||Math.abs(at-bt)<=MATCH_WINDOW_MS;
 }
 function entainCardSelections(card,h,a,sport){
+  card=entainCardPayload(card);
   const markets=card?.markets&&typeof card.markets==='object'?Object.entries(card.markets):[];
   const entrantsObj=card?.entrants&&typeof card.entrants==='object'?card.entrants:{};
   const pricesObj=card?.prices&&typeof card.prices==='object'?card.prices:{};
@@ -138,10 +161,8 @@ function entainCardSelections(card,h,a,sport){
   // Never infer match-result prices from entrants belonging to other markets.
   for(const [marketKey,m] of markets){
     if(!m||typeof m!=='object')continue;
-    const label=String(m.name??m.display_name??'').trim();
-    // An unqualified market title is essential: '1st Half Match Betting'
-    // and 'Winning Margin' are not full-match moneyline markets.
-    if(!/^(match betting|head to head|head-to-head|match result|moneyline|full time result|full-time result|game winner)$/i.test(label))continue;
+    // Exact, explicitly full-game market names only; never treat a period bet as H2H.
+    if(!entainFullMatchMarket(m,sport))continue;
     if(m.is_open_for_betting===false||m.is_open===false||m.suspended===true)continue;
     const mid=String(m.id??marketKey);
     const ids=Array.isArray(m.entrant_ids)?m.entrant_ids.map(String):[];
@@ -233,14 +254,16 @@ async function entainBook(host,book,anchors,sport){
     if(result.some(r=>r.status==='rejected'&&/HTTP 429/.test(String(r.reason?.message||r.reason))))break;
   }
   // Public provider schema metadata only; helps detect feed format changes.
-  const representative=cards.find(r=>r.status==='fulfilled')?.value?.card;
+  const representativeRaw=cards.find(r=>r.status==='fulfilled')?.value?.card;
+  const representative=entainCardPayload(representativeRaw);
   let schema_sample;
-  if(representative){
+  if(representativeRaw){
     const markets=Object.entries(representative.markets||{});
     const money=markets.filter(([,m])=>/match betting|head to head|moneyline|match result|full.time result/i.test(String(m?.name||m?.display_name||'')));
     schema_sample={
+      payload_keys:Object.keys(representativeRaw||{}).slice(0,12),
       market_count:markets.length,entrant_count:Object.keys(representative.entrants||{}).length,price_count:Object.keys(representative.prices||{}).length,
-      named_markets:markets.slice(0,8).map(([k,m])=>({id:k,name:m?.name||m?.display_name,fields:Object.keys(m||{}).slice(0,10)})),
+      named_markets:markets.slice(0,14).map(([k,m])=>({id:k,name:entainMarketName(m),fields:Object.keys(m||{}).slice(0,10)})),
       relevant_markets:money.slice(0,3).map(([k,m])=>({id:k,name:m?.name||m?.display_name,entrant_ids:Array.isArray(m?.entrant_ids)?m.entrant_ids.slice(0,4):m?.entrant_ids,market_keys:Object.keys(m||{}).slice(0,12)})),
       entrant_sample:Object.entries(representative.entrants||{}).slice(0,2).map(([k,v])=>({key:k,fields:Object.keys(v||{}),market_id:v?.market_id,id:v?.id,name:v?.name})),
       price_sample:Object.entries(representative.prices||{}).slice(0,3).map(([k,v])=>({key:k,fields:Object.keys(v||{}),market_id:v?.market_id,entrant_id:v?.entrant_id,odds_fields:Object.keys(v?.odds||{})}))
@@ -248,16 +271,33 @@ async function entainBook(host,book,anchors,sport){
   }
   const events=[];let cardFailures=0;
   const parser_stats={cards_fetched:0,no_accepted_match_market:0,invalid_fixture_after_parsing:0,accepted:0};
+  const rejected_card_samples=[];
   for(const r of cards){
     if(r.status==='rejected'){cardFailures++;continue}
     parser_stats.cards_fetched++;
     const{x,card}=r.value;const sels=entainCardSelections(card,x.ta.home,x.ta.away,x.meta.key);
-    if(sels.length<2){parser_stats.no_accepted_match_market++;continue}
+    if(sels.length<2){
+      parser_stats.no_accepted_match_market++;
+      if(rejected_card_samples.length<2){
+        const payload=entainCardPayload(card);
+        const ms=Object.values(payload?.markets||{});
+        const marketNames=ms.map(entainMarketName).filter(Boolean);
+        const supported=ms.filter(m=>entainFullMatchMarket(m,x.meta.key));
+        rejected_card_samples.push({
+          sport:x.meta.key,market_count:ms.length,entrant_count:Object.keys(payload?.entrants||{}).length,
+          price_count:Object.keys(payload?.prices||{}).length,
+          supported_moneyline_markets:supported.length,
+          market_names:marketNames.slice(0,12),
+          reason:ms.length===0?'no market objects in event card':supported.length===0?'no recognized full-match market': 'recognized market but no valid home/away prices'
+        });
+      }
+      continue
+    }
     const item=eventObj(x.meta.key,x.ta.home,x.ta.away,x.time,book,sels,book.toLowerCase());
     if(item){events.push(item);parser_stats.accepted++}
     else parser_stats.invalid_fixture_after_parsing++;
   }
-  return{events,listed:listed.length,cards:cards.length,cardFailures,parser_stats,categoryErrors,categories:selected.map(x=>x.key),schema_sample};
+  return{events,listed:listed.length,cards:cards.length,cardFailures,parser_stats,rejected_card_samples,categoryErrors,categories:selected.map(x=>x.key),schema_sample};
 }
 
 function merge(events){
@@ -420,7 +460,8 @@ async function scan(sport){
     if(result.status==='fulfilled')providers.push({
       provider:name,ok:!values.categoryErrors?.length,events:values.events.length,
       listed:values.listed,cards:values.cards,card_failures:values.cardFailures,parser_stats:values.parser_stats,
-      categories:values.categories||[],schema_sample:values.schema_sample,
+      rejected_card_samples:values.rejected_card_samples,schema_sample:values.schema_sample,
+      categories:values.categories||[],
       error:values.categoryErrors?.length?values.categoryErrors.join(' | '):undefined
     });
     else providers.push({provider:name,ok:false,events:0,error:String(result.reason?.message||result.reason).slice(0,200)});
