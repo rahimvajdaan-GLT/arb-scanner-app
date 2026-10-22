@@ -329,6 +329,11 @@ async function entainBook(host,book,anchors,sport){
           sport:x.meta.key,market_count:ms.length,entrant_count:Object.keys(payload?.entrants||{}).length,
           price_count:Object.keys(payload?.prices||{}).length,
           supported_moneyline_markets:supported.length,
+          match_market_fields:supported[0]?Object.keys(supported[0]).slice(0,12):[],
+          linked_selection_ids:supported[0]?entainSelectionIds(supported[0]).length:0,
+          entrant_market_link_count:supported[0]?Object.values(payload?.entrants||{}).filter(e=>e&&String(e.market_id??e.marketId??'')===String(supported[0].id)).length:0,
+          sample_entrant_fields:Object.keys(Object.values(payload?.entrants||{})[0]||{}).slice(0,12),
+          sample_price_fields:Object.keys(Object.values(payload?.prices||{})[0]||{}).slice(0,12),
           market_names:marketNames.slice(0,12),
           reason:ms.length===0?'no market objects in event card':supported.length===0?'no recognized full-match market': 'recognized market but no valid home/away prices'
         });
