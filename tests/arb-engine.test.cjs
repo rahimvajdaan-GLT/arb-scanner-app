@@ -123,3 +123,22 @@ test('frontend invalidates old quotes and refreshes the versioned script',()=>{
  assert.match(html,/arb:scan-expired/);
  assert.match(html,/live\.js\?v=36/);
 });
+
+test('nested Entain event cards with decimal numeric odds yield two valid selections',()=>{
+ const payload={data:{event:{
+   markets:{main:{id:'main',name:'Match Winner',entrant_ids:['h','a']}},
+   entrants:{h:{id:'h',name:'Lakers'},a:{id:'a',name:'Celtics'}},
+   prices:{'main:h':{market_id:'main',entrant_id:'h',odds:1.91},'main:a':{market_id:'main',entrant_id:'a',odds:1.96}}
+ }}};
+ const found=E.entainCardSelections(payload,'Lakers','Celtics','basketball');
+ assert.equal(found.length,2);
+ assert.equal(found[0].odds,1.91);
+});
+test('period winner markets are not misclassified as full-match odds',()=>{
+ const card={
+  markets:{first:{id:'first',name:'1st Period Match Winner',entrant_ids:['h','a']}},
+  entrants:{h:{id:'h',name:'Lakers'},a:{id:'a',name:'Celtics'}},
+  prices:{'first:h':{market_id:'first',entrant_id:'h',odds:1.91},'first:a':{market_id:'first',entrant_id:'a',odds:1.96}}
+ };
+ assert.equal(E.entainCardSelections(card,'Lakers','Celtics','basketball').length,0);
+});
