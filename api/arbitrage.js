@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v20-sockodds';
+const ENGINE='au-openbooks-v21-sockodds-v1-parser';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=90*60*1000;
 const BASE_HEADERS={
@@ -200,50 +200,53 @@ function arb(b){
 const sockCache={until:0,promise:null};
 async function sockOdds(){
   const key=process.env.SOCKODDS_API_KEY;
-  if(!key)return {events:[],error:'SOCKODDS_API_KEY is not configured for this deployment',configured:false};
+  if(!key)return {events:[],rawEvents:0,configured:false,error:'SOCKODDS_API_KEY not configured on this deployment'};
   if(sockCache.promise&&sockCache.until>Date.now())return sockCache.promise;
   sockCache.until=Date.now()+5*60*1000;
   sockCache.promise=(async()=>{
-    const all=[];const errors=[];let rawEvents=0;
-    for(const league of ['afl','nrl']){
-      try{
-        const url='https://api.sockodds.com/v1/odds?'+new URLSearchParams({league,markets:'winner',regions:'au',limit:'25',starts_after:new Date().toISOString()});
-        const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),13000);
-        let response;
-        try{response=await fetch(url,{headers:{Authorization:'Bearer '+key,Accept:'application/json'},signal:controller.signal})}
-        finally{clearTimeout(timer)}
-        if(!response.ok){errors.push(league+': HTTP '+response.status);if(response.status===401||response.status===403||response.status===429)break;continue}
-        const payload=await response.json(),rows=Array.isArray(payload?.data)?payload.data:[];
-        rawEvents+=rows.length;
-        for(const ev of rows){
-          if(ev.status&&ev.status!=='scheduled')continue;
-          const participants=Array.isArray(ev.participants)?ev.participants:[];
-          const home=participants.find(p=>p.side==='home'||p.role==='home')?.name||participants[0]?.name;
-          const away=participants.find(p=>p.side==='away'||p.role==='away')?.name||participants[1]?.name;
-          const ta=(home&&away)?{home,away}:teams(ev.name);
-          if(!ta)continue;
-          for(const bm of objValues(ev.bookmakers)){
-            const book=String(bm.name||bm.key||bm.bookmaker||'').trim();
-            if(!book)continue;
-            const sels=[];
-            for(const m of objValues(bm.markets)){
-              const mkey=String(m.key||m.market?.key||m.name||'').toLowerCase();
-              const period=String(m.period||m.market?.period||'full').toLowerCase();
-              if(!/^(winner|h2h|moneyline|match winner|match result)$/.test(mkey)||!['full','game','match'].includes(period))continue;
-              for(const o of objValues(m.outcomes)){
-                const side=String(o.side||o.outcome?.side||'').toLowerCase();
-                const name=String(o.name||o.outcome?.name||'');
-                const odds=Number(o.decimal_odds??o.decimalOdds??o.price??o.odds);
-                if(Number.isFinite(odds)&&odds>1)sels.push({name,role:side==='home'||side==='away'||side==='draw'?side:undefined,odds});
-              }
+    const events=[];let rawEvents=0;const observed=new Set();
+    try{
+      // v1 serves /odds with either grouped markets or grouped bookmakers.
+      // One small unfiltered event page avoids guessing unavailable league IDs.
+      const params=new URLSearchParams({markets:'winner',regions:'au',group_by:'bookmaker',limit:'20',starts_after:new Date().toISOString()});
+      const c=new AbortController(),timer=setTimeout(()=>c.abort(),13000);
+      let r;
+      try{r=await fetch('https://api.sockodds.com/v1/odds?'+params,{headers:{Authorization:'Bearer '+key,Accept:'application/json'},signal:c.signal})}
+      finally{clearTimeout(timer)}
+      if(!r.ok)return {events:[],rawEvents:0,configured:true,error:'SockOdds HTTP '+r.status};
+      const json=await r.json(),rows=Array.isArray(json?.data)?json.data:[];
+      rawEvents=rows.length;
+      for(const ev of rows){
+        if(ev.status!=='scheduled')continue;
+        const parts=Array.isArray(ev.participants)?ev.participants:[];
+        const hn=parts.find(p=>p.role==='home')?.identity?.name||parts.find(p=>p.role==='home')?.name;
+        const an=parts.find(p=>p.role==='away')?.identity?.name||parts.find(p=>p.role==='away')?.name;
+        const pair=hn&&an?{home:hn,away:an}:teams(ev.name);
+        if(!pair)continue;
+        const league=String(ev.league?.key||ev.league||'');
+        const sp=/afl/i.test(league)?'afl':/nrl|rlwc|rugby_league/i.test(league)?'nrl':sportOf(league);
+        for(const bm of objValues(ev.bookmakers)){
+          const book=String(bm.name||bm.key||'').trim();if(!book)continue;
+          const selections=[];
+          for(const market of objValues(bm.markets)){
+            if(String(market.key||market.market?.key||'').toLowerCase()!=='winner')continue;
+            const period=String(market.period||'full').toLowerCase();
+            if(!['full','game','match'].includes(period))continue;
+            for(const o of objValues(market.outcomes)){
+              if(o.available===false)continue;
+              const odds=Number(o.decimal_odds);
+              const side=String(o.side||'').toLowerCase();
+              if(!Number.isFinite(odds)||odds<=1)continue;
+              if(side!=='home'&&side!=='away'&&side!=='draw')continue;
+              selections.push({role:side,odds,name:o.name});
             }
-            const item=eventObj(league,ta.home,ta.away,ev.scheduled_start,book,sels,'sockodds');
-            if(item)all.push(item);
           }
+          const item=eventObj(sp,pair.home,pair.away,ev.scheduled_start,book,selections,'sockodds');
+          if(item){events.push(item);observed.add(book)}
         }
-      }catch(e){errors.push(league+': '+String(e?.message||e).slice(0,90))}
-    }
-    return{events:all,rawEvents,error:errors.join(' | ')||undefined,configured:true};
+      }
+      return {events,rawEvents,bookmakers:[...observed],configured:true};
+    }catch(e){return {events:[],rawEvents,configured:true,error:'SockOdds request/parser: '+String(e?.message||e).slice(0,160)}}
   })();
   return sockCache.promise;
 }
@@ -268,7 +271,7 @@ async function scan(sport){
   }
 
   const sock=await sockOdds();
-  providers.unshift({provider:'SockOdds',ok:!sock.error,events:sock.events.length,listed:sock.rawEvents??0,configured:sock.configured,error:sock.error});
+  providers.unshift({provider:'SockOdds',ok:!sock.error,events:sock.events.length,listed:sock.rawEvents??0,configured:sock.configured,bookmakers:sock.bookmakers??[],error:sock.error});
   let all=[...pe,...neds.events,...lads.events,...sock.events];
   if(sport)all=all.filter(e=>e.sport===sport);
   const buckets=merge(all);
