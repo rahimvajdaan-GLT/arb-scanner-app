@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v29-bookmaker-identity';
+const ENGINE='au-openbooks-v30-stable-comparisons';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=90*60*1000;
 const BASE_HEADERS={
@@ -199,35 +199,55 @@ function merge(events){
   }
   return buckets;
 }
+
+function comparablePool(b,count){
+  const roles=count===3?['home','draw','away']:['home','away'];
+  const allowed=new Set([...b.outcomeCounts].filter(([,n])=>n===count).map(([book])=>book));
+  if(allowed.size<2)return null;
+  const options=roles.map(role=>{
+    const byBook=new Map();
+    for(const offer of b.offers){
+      if(offer.role!==role||!allowed.has(offer.book)||!Number.isFinite(offer.odds)||offer.odds<=1)continue;
+      if(!byBook.has(offer.book)||offer.odds>byBook.get(offer.book).odds)byBook.set(offer.book,offer);
+    }
+    return [...byBook.values()].sort((a,z)=>z.odds-a.odds);
+  });
+  if(options.some(row=>!row.length))return null;
+  // Deliberately compare different bookmakers, including the second-best quote
+  // when one bookmaker offers the highest price on every outcome.
+  let best=null;
+  function tryCombo(index,chosen,used,inv){
+    if(best&&inv>=best.inv)return;
+    if(index===roles.length){
+      if(used.size>=2)best={inv,chosen:[...chosen]};
+      return;
+    }
+    for(const offer of options[index]){
+      chosen.push(offer);
+      const other=new Set(used);other.add(offer.book);
+      tryCombo(index+1,chosen,other,inv+1/offer.odds);
+      chosen.pop();
+    }
+  }
+  tryCombo(0,[],new Set(),0);
+  if(!best||!Number.isFinite(best.inv))return null;
+  return {...best,count,roles,options};
+}
+function bestComparablePool(b){
+  return [comparablePool(b,2),comparablePool(b,3)].filter(Boolean).sort((a,z)=>a.inv-z.inv)[0]||null;
+}
 function arb(b){
   if(b.books.size<2)return null;
-  // Two-way and three-way match-winner markets have different settlement rules.
-  // Never combine them into a synthetic arbitrage.
-  // Do not discard an entire fixture when providers quote different settlement markets.
-  // Evaluate two-way and three-way pools independently, never mix their selections.
-  const candidates=[];
-  for(const count of [2,3]){
-    const roles=count===3?['home','draw','away']:['home','away'];
-    const allowed=new Set([...b.outcomeCounts].filter(([,n])=>n===count).map(([name])=>name));
-    if(allowed.size<2)continue;
-    const best={};
-    for(const offer of b.offers){
-      if(!allowed.has(offer.book)||!roles.includes(offer.role))continue;
-      if(!best[offer.role]||offer.odds>best[offer.role].odds)best[offer.role]=offer;
-    }
-    if(roles.some(r=>!best[r]))continue;
-    const sels=roles.map(r=>({name:r==='home'?b.home:r==='away'?b.away:'Draw',point:null,best_price:Number(best[r].odds),best_bookmaker:best[r].book}));
-    if(new Set(sels.map(x=>x.best_bookmaker)).size<2)continue;
-    const inv=sels.reduce((sum,x)=>sum+1/x.best_price,0);
-    if(Number.isFinite(inv)&&inv<1)candidates.push({sels,inv});
-  }
-  if(!candidates.length)return null;
-  const {sels,inv}=candidates.sort((a,z)=>a.inv-z.inv)[0];
+  const candidate=bestComparablePool(b);
+  if(!candidate||candidate.inv>=1)return null;
+  const {roles,chosen,inv}=candidate;
+  const sels=roles.map((r,i)=>({name:r==='home'?b.home:r==='away'?b.away:'Draw',point:null,best_price:chosen[i].odds,best_bookmaker:chosen[i].book}));
   const roi=(1/inv-1)*100;
-
-  return{event_id:`${b.sport}-${norm(b.home).replace(/\s/g,'')}-${norm(b.away).replace(/\s/g,'')}-${Math.round(parseMs(b.time)/60000)}`,sport_key:b.sport,home_team:b.home,away_team:b.away,commence_time:b.time,market_type:'h2h',source_type:ENGINE,is_arb:true,arb_pct:Number(roi.toFixed(3)),selections:sels,optimal_stakes:sels.map(x=>({name:x.name,point:null,price:x.best_price,bookmaker:x.best_bookmaker,stake:((1/x.best_price)/inv)*100}))};
+  return {event_id:`${b.sport}-${norm(b.home).replace(/\\s/g,'')}-${norm(b.away).replace(/\\s/g,'')}-${Math.round(parseMs(b.time)/60000)}`,
+    sport_key:b.sport,home_team:b.home,away_team:b.away,commence_time:b.time,market_type:'h2h',
+    source_type:ENGINE,is_arb:true,arb_pct:Number(roi.toFixed(3)),selections:sels,
+    optimal_stakes:sels.map(x=>({name:x.name,point:null,price:x.best_price,bookmaker:x.best_bookmaker,stake:((1/x.best_price)/inv)*100}))};
 }
-
 
 const SOCK_LEAGUES=['nfl','nba','nhl','epl','atp','mlb','la_liga','wta','bundesliga','serie_a'];
 const sockCache={until:0,promise:null};
@@ -245,6 +265,17 @@ async function sockOdds(){
       let r;
       try{r=await fetch('https://api.sockodds.com/v1/odds?'+params,{headers:{Authorization:'Bearer '+key,Accept:'application/json'},signal:c.signal})}
       finally{clearTimeout(timer)}
+      if(r.status===429){
+        const rawRetry=r.headers.get('retry-after');
+        const retrySeconds=rawRetry==null?NaN:Number(rawRetry);
+        const hasRetry=rawRetry!=null&&Number.isFinite(retrySeconds)&&retrySeconds>0;
+        const now=new Date();
+        const nextMonth=Date.UTC(now.getUTCFullYear(),now.getUTCMonth()+1,1);
+        const pauseUntil=hasRetry?Date.now()+Math.min(3600000,retrySeconds*1000):nextMonth;
+        sockCache.until=pauseUntil;
+        const reason=hasRetry?'SockOdds minute request limit':'SockOdds monthly object allowance reached (or no retry window supplied)';
+        return {events:[],rawEvents:0,configured:true,error:reason,retry_at:new Date(pauseUntil).toISOString()};
+      }
       if(!r.ok)return {events:[],rawEvents:0,configured:true,error:'SockOdds HTTP '+r.status};
       const json=await r.json(),rows=Array.isArray(json?.data)?json.data:[];
       rawEvents=rows.length;
@@ -285,26 +316,18 @@ async function sockOdds(){
 
 
 function priceAudit(b){
- if(b.books.size<2)return null;
- const candidates=[];
- for(const count of [2,3]){
-   const eligible=[...b.outcomeCounts].filter(([,n])=>n===count).map(([name])=>name);
-   if(eligible.length<2)continue;
-   const roles=count===3?['home','draw','away']:['home','away'];
-   const best=roles.map(role=>b.offers.filter(o=>eligible.includes(o.book)&&o.role===role).sort((a,z)=>z.odds-a.odds)[0]);
-   if(best.some(o=>!o))continue;
-   if(new Set(best.map(o=>o.book)).size<2)continue;
-   const inv=best.reduce((sum,o)=>sum+1/o.odds,0);
-   if(Number.isFinite(inv))candidates.push({inv,count,best});
- }
- if(!candidates.length)return null;
- const {inv,count,best}=candidates.sort((a,z)=>a.inv-z.inv)[0];
- const allPrices=b.offers.filter(o=>b.outcomeCounts.get(o.book)===count&&Number.isFinite(o.odds)&&o.odds>1).map(o=>({role:o.role,odds:o.odds,book:o.book}));
- const byRole={};for(const role of count===3?['home','draw','away']:['home','away'])byRole[role]=allPrices.filter(o=>o.role===role).sort((x,y)=>y.odds-x.odds).slice(0,15);
- return {fixture:b.home+' vs '+b.away,sport:b.sport,
-   roi_pct:Number(((1/inv-1)*100).toFixed(3)),outcomes:count,
-   books:[...new Set(allPrices.map(o=>o.book))],bookmaker_count:new Set(allPrices.map(o=>o.book)).size,
-   all_bookmaker_prices:byRole,best_odds:best.map(o=>({role:o.role,odds:o.odds,book:o.book}))};
+  if(b.books.size<2)return null;
+  const pool=bestComparablePool(b);
+  if(!pool)return null;
+  const byRole={};
+  for(let i=0;i<pool.roles.length;i++){
+    byRole[pool.roles[i]]=pool.options[i].map(o=>({role:o.role,odds:o.odds,book:o.book}));
+  }
+  const allBooks=[...new Set(pool.options.flat().map(o=>o.book))];
+  return {fixture:b.home+' vs '+b.away,sport:b.sport,
+    roi_pct:Number(((1/pool.inv-1)*100).toFixed(3)),outcomes:pool.count,
+    books:allBooks,bookmaker_count:allBooks.length,
+    all_bookmaker_prices:byRole,best_odds:pool.chosen.map(o=>({role:o.role,odds:o.odds,book:o.book}))};
 }
 async function scan(sport){
   const providers=[];
@@ -326,7 +349,7 @@ async function scan(sport){
   }
 
   const sock=await sockOdds();
-  providers.unshift({provider:'SockOdds',ok:!sock.error,events:sock.events.length,listed:sock.rawEvents??0,league:sock.league,configured:sock.configured,bookmakers:sock.bookmakers??[],bookmaker_count:sock.bookmakers?.length??0,error:sock.error});
+  providers.unshift({provider:'SockOdds',ok:!sock.error,events:sock.events.length,listed:sock.rawEvents??0,league:sock.league,configured:sock.configured,bookmakers:sock.bookmakers??[],bookmaker_count:sock.bookmakers?.length??0,retry_at:sock.retry_at,error:sock.error});
   let all=[...pe,...neds.events,...lads.events,...sock.events];
   if(sport)all=all.filter(e=>e.sport===sport);
   const buckets=merge(all);
@@ -349,7 +372,7 @@ async function scan(sport){
     if(reason!=='comparable'&&rejectedExamples.length<3)rejectedExamples.push({fixture:b.home+' vs '+b.away,reason,books:[...b.books],outcomes:[...b.outcomeCounts].map(([book,count])=>({book,count}))});
   }
   const audited=cross.map(priceAudit).filter(Boolean).sort((a,b)=>b.roi_pct-a.roi_pct);
-  return {engine:ENGINE,providers,active_bookmakers:distinctBooks,active_bookmaker_count:distinctBooks.length,merged_games:buckets.length,cross_book_games:cross.length,comparable_markets:audited.length,validation_reasons:auditReasons,rejected_examples:rejectedExamples,closest_markets:audited.slice(0,5),comparisons:audited.slice(0,35),arbs:arbs.length,results:arbs,scan_scope:'Limited requests with cooldown on provider rate limits'};
+  return {engine:ENGINE,scanned_at:new Date().toISOString(),providers,active_bookmakers:distinctBooks,active_bookmaker_count:distinctBooks.length,merged_games:buckets.length,cross_book_games:cross.length,comparable_markets:audited.length,validation_reasons:auditReasons,rejected_examples:rejectedExamples,closest_markets:audited.slice(0,5),comparisons:audited.slice(0,35),arbs:arbs.length,results:arbs,scan_scope:'Limited requests with cooldown on provider rate limits'};
 }
 export default async function handler(req,res){
   if(req.method!=='GET'){res.setHeader('Allow','GET');return res.status(405).json({error:'Method not allowed'})}
@@ -364,7 +387,7 @@ export default async function handler(req,res){
   }
   try{
     const data=await item.promise;
-    res.setHeader('Cache-Control','private, max-age=30, stale-while-revalidate=30');
+    res.setHeader('Cache-Control','public, max-age=0, s-maxage=90');
     return res.status(200).json(debug?data:data.results);
   }catch(e){
     scanCache.delete(key);
