@@ -127,7 +127,7 @@ window.addEventListener('load',()=>{const b=document.getElementById('scanLiveBtn
      if(empty)empty.textContent='No verified positive arbitrage at this scan';
      if(detail)detail.textContent='Matching bookmaker prices were checked. Prices may change; this does not mean there are no upcoming games.';
    }
-  }catch(e){if(id!==serial)return;lines.push('Live diagnostic failed: '+String(e?.message||e));}
+  }catch(e){lines.push('Comparison rendering failed: '+String(e?.message||e));}
   if(hasPositive)return;
   diag.style.display='block';diag.replaceChildren();
   const heading=document.createElement('strong');heading.textContent='Feed diagnostic';diag.append(heading);
