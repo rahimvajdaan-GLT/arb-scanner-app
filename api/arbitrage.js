@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v21-sockodds-v1-parser';
+const ENGINE='au-openbooks-v22-price-audit';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=90*60*1000;
 const BASE_HEADERS={
@@ -251,6 +251,23 @@ async function sockOdds(){
   return sockCache.promise;
 }
 
+
+function priceAudit(b){
+ if(b.books.size<2)return null;
+ const counts=[...b.outcomeCounts.values()];
+ if(!counts.length||counts.some(c=>c!==counts[0])||![2,3].includes(counts[0]))return null;
+ const roles=counts[0]===3?['home','draw','away']:['home','away'];
+ const best=roles.map(role=>{
+   const offers=b.offers.filter(o=>o.role===role&&b.outcomeCounts.get(o.book)===counts[0]);
+   return offers.sort((a,z)=>z.odds-a.odds)[0];
+ });
+ if(best.some(x=>!x))return null;
+ const inv=best.reduce((sum,o)=>sum+1/o.odds,0);
+ if(!Number.isFinite(inv))return null;
+ return {fixture:b.home+' vs '+b.away,sport:b.sport,
+   roi_pct:Number(((1/inv-1)*100).toFixed(3)),outcomes:counts[0],
+   books:[...b.books],best_odds:best.map(o=>({role:o.role,odds:o.odds,book:o.book}))};
+}
 async function scan(sport){
   const providers=[];
   let pe=[];
@@ -278,7 +295,8 @@ async function scan(sport){
   const cross=buckets.filter(b=>b.books.size>=2);
   const arbs=cross.map(arb).filter(Boolean).sort((a,b)=>b.arb_pct-a.arb_pct).slice(0,25);
 
-  return {engine:ENGINE,providers,merged_games:buckets.length,cross_book_games:cross.length,arbs:arbs.length,results:arbs,scan_scope:'Limited requests with cooldown on provider rate limits'};
+  const audited=cross.map(priceAudit).filter(Boolean).sort((a,b)=>b.roi_pct-a.roi_pct);
+  return {engine:ENGINE,providers,merged_games:buckets.length,cross_book_games:cross.length,comparable_markets:audited.length,closest_markets:audited.slice(0,5),arbs:arbs.length,results:arbs,scan_scope:'Limited requests with cooldown on provider rate limits'};
 }
 export default async function handler(req,res){
   if(req.method!=='GET'){res.setHeader('Allow','GET');return res.status(405).json({error:'Method not allowed'})}
