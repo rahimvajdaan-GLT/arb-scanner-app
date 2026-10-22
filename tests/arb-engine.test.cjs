@@ -8,7 +8,7 @@ const path=require('node:path');
 const js=fs.readFileSync(path.join(__dirname,'../api/arbitrage.js'),'utf8')
  .replace('export default async function handler','async function handler');
 const env={console,Date,URL,URLSearchParams,setTimeout,clearTimeout,process:{env:{}}};
-vm.runInNewContext(js+'\nthis.testEngine={eventObj,merge,priceAudit,arb,bookmakerName,same,entainCardSelections};',env,{filename:'api/arbitrage.js'});
+vm.runInNewContext(js+'\nthis.testEngine={eventObj,merge,priceAudit,arb,bookmakerName,same,entainCardSelections,krokEvents,krokSportRow};',env,{filename:'api/arbitrage.js'});
 const E=env.testEngine;
 const future=new Date(Date.now()+24*60*60*1000).toISOString();
 function fixture(book,home,away,values,sport='basketball'){
@@ -121,7 +121,7 @@ test('frontend invalidates old quotes and refreshes the versioned script',()=>{
  assert.match(front,/MAX_QUOTE_AGE_MS = 2 \* 60 \* 1000/);
  assert.match(front,/latestEvents = \[\];/);
  assert.match(html,/arb:scan-expired/);
- assert.match(html,/live\.js\?v=39/);
+ assert.match(html,/live\.js\?v=41/);
 });
 
 test('nested Entain event cards with decimal numeric odds yield two valid selections',()=>{
@@ -161,4 +161,31 @@ test('AFL market-ID entrant-to-price link excludes other markets',()=>{
  assert.equal(selections.length,2);
  assert.equal(selections[0].odds,1.95);
  assert.equal(selections[1].odds,2);
+});
+
+test('optional aggregator accepts fresh h2h prices and excludes period markets',()=>{
+ const t=new Date(Date.now()+24*3600000).toISOString();
+ const c=new Date().toISOString();
+ const rows={data:[
+  {home:'Geelong Cats',away:'Carlton Blues',start_time:t,captured_at:c,bookmaker:'TAB',markets:[{key:'h2h',name:'Match Betting',selections:[{name:'Geelong Cats',price:2.1},{name:'Carlton Blues',price:1.8}]}]},
+  {home:'Geelong Cats',away:'Carlton Blues',start_time:t,captured_at:c,bookmaker:'Sportsbet',markets:[{key:'h2h',name:'1st Half Match Betting',selections:[{name:'Geelong Cats',price:22},{name:'Carlton Blues',price:22}]}]},
+  {home:'Geelong Cats',away:'Carlton Blues',start_time:t,captured_at:new Date(Date.now()-3600000).toISOString(),bookmaker:'Ladbrokes',markets:[{key:'h2h',name:'Match Betting',selections:[{name:'Geelong Cats',price:30},{name:'Carlton Blues',price:30}]}]}
+ ]};
+ const result=E.krokEvents(rows,'afl');
+ assert.equal(result.events.length,1);
+ assert.equal(result.stale,1);
+ assert.equal(result.events[0].book,'TAB');
+});
+test('optional aggregator sport lookup uses documented sport index',()=>{
+ const rows=[{sport:'aussie-rules',href:'/api/v1/odds-feed/sports/aussie-rules'}, {sport:'basketball-nba',href:'/api/v1/odds-feed/sports/basketball-nba'}];
+ assert.equal(E.krokSportRow(rows,'afl').sport,'aussie-rules');
+ assert.equal(E.krokSportRow(rows,'basketball').sport,'basketball-nba');
+});
+test('extra feed only runs on user opt-in; auto refresh cannot drain free quota',()=>{
+ const front=fs.readFileSync(path.join(__dirname,'../live.js'),'utf8');
+ const page=fs.readFileSync(path.join(__dirname,'../scanner.html'),'utf8');
+ assert.match(page,/id="liveExtraFeed"/);
+ assert.match(front,/include_krok/);
+ assert.match(front,/liveEls.extraFeed\.checked\) liveEls.autoRefresh.checked = false/);
+ assert.match(page,/live\.js\?v=41/);
 });
