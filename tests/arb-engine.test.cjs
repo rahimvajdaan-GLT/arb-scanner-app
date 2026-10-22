@@ -74,7 +74,7 @@ test('fixture matching does not combine rival teams in same city or distant star
  assert.equal(E.merge([a,late]).length,2);
 });
 test('SockOdds HTTP 429 honors Retry-After without repeated calls to the same function instance',async()=>{
- const scope={console,Date,URL,URLSearchParams,setTimeout,clearTimeout,process:{env:{SOCKODDS_API_KEY:'test-key'}},calls:0};
+ const scope={console,Date,URL,URLSearchParams,AbortController,setTimeout,clearTimeout,process:{env:{SOCKODDS_API_KEY:'test-key'}},calls:0};
  scope.fetch=async()=>{scope.calls++;return {status:429,ok:false,headers:{get:k=>k==='retry-after'?'120':null}}};
  vm.runInNewContext(js+'\nthis.sockOdds=sockOdds',scope);
  const a=await scope.sockOdds(),b=await scope.sockOdds();
