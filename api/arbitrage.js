@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v27-comparison-board';
+const ENGINE='au-openbooks-v28-all-bookmaker-prices';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=90*60*1000;
 const BASE_HEADERS={
@@ -281,9 +281,12 @@ function priceAudit(b){
  }
  if(!candidates.length)return null;
  const {inv,count,best}=candidates.sort((a,z)=>a.inv-z.inv)[0];
+ const allPrices=b.offers.filter(o=>b.outcomeCounts.get(o.book)===count&&Number.isFinite(o.odds)&&o.odds>1).map(o=>({role:o.role,odds:o.odds,book:o.book}));
+ const byRole={};for(const role of count===3?['home','draw','away']:['home','away'])byRole[role]=allPrices.filter(o=>o.role===role).sort((x,y)=>y.odds-x.odds).slice(0,15);
  return {fixture:b.home+' vs '+b.away,sport:b.sport,
    roi_pct:Number(((1/inv-1)*100).toFixed(3)),outcomes:count,
-   books:[...new Set(best.map(o=>o.book))],best_odds:best.map(o=>({role:o.role,odds:o.odds,book:o.book}))};
+   books:[...new Set(allPrices.map(o=>o.book))],bookmaker_count:new Set(allPrices.map(o=>o.book)).size,
+   all_bookmaker_prices:byRole,best_odds:best.map(o=>({role:o.role,odds:o.odds,book:o.book}))};
 }
 async function scan(sport){
   const providers=[];
@@ -305,10 +308,11 @@ async function scan(sport){
   }
 
   const sock=await sockOdds();
-  providers.unshift({provider:'SockOdds',ok:!sock.error,events:sock.events.length,listed:sock.rawEvents??0,league:sock.league,configured:sock.configured,bookmakers:sock.bookmakers??[],error:sock.error});
+  providers.unshift({provider:'SockOdds',ok:!sock.error,events:sock.events.length,listed:sock.rawEvents??0,league:sock.league,configured:sock.configured,bookmakers:sock.bookmakers??[],bookmaker_count:sock.bookmakers?.length??0,error:sock.error});
   let all=[...pe,...neds.events,...lads.events,...sock.events];
   if(sport)all=all.filter(e=>e.sport===sport);
   const buckets=merge(all);
+  const distinctBooks=[...new Set(all.map(x=>x.book))].sort();
   const cross=buckets.filter(b=>b.books.size>=2);
   const arbs=cross.map(arb).filter(Boolean).sort((a,b)=>b.arb_pct-a.arb_pct).slice(0,25);
 
@@ -327,7 +331,7 @@ async function scan(sport){
     if(reason!=='comparable'&&rejectedExamples.length<3)rejectedExamples.push({fixture:b.home+' vs '+b.away,reason,books:[...b.books],outcomes:[...b.outcomeCounts].map(([book,count])=>({book,count}))});
   }
   const audited=cross.map(priceAudit).filter(Boolean).sort((a,b)=>b.roi_pct-a.roi_pct);
-  return {engine:ENGINE,providers,merged_games:buckets.length,cross_book_games:cross.length,comparable_markets:audited.length,validation_reasons:auditReasons,rejected_examples:rejectedExamples,closest_markets:audited.slice(0,5),comparisons:audited.slice(0,35),arbs:arbs.length,results:arbs,scan_scope:'Limited requests with cooldown on provider rate limits'};
+  return {engine:ENGINE,providers,active_bookmakers:distinctBooks,active_bookmaker_count:distinctBooks.length,merged_games:buckets.length,cross_book_games:cross.length,comparable_markets:audited.length,validation_reasons:auditReasons,rejected_examples:rejectedExamples,closest_markets:audited.slice(0,5),comparisons:audited.slice(0,35),arbs:arbs.length,results:arbs,scan_scope:'Limited requests with cooldown on provider rate limits'};
 }
 export default async function handler(req,res){
   if(req.method!=='GET'){res.setHeader('Allow','GET');return res.status(405).json({error:'Method not allowed'})}
