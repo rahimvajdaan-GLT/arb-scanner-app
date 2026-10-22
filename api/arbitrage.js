@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v32-market-scoped-quotes';
+const ENGINE='au-openbooks-v33-visible-fixtures';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=30*60*1000;
 const BASE_HEADERS={
@@ -326,13 +326,13 @@ async function sockOdds(){
       finally{clearTimeout(timer)}
       if(r.status===429){
         const rawRetry=r.headers.get('retry-after');
-        const retrySeconds=rawRetry==null?NaN:Number(rawRetry);
-        const hasRetry=rawRetry!=null&&Number.isFinite(retrySeconds)&&retrySeconds>0;
-        const now=new Date();
-        const nextMonth=Date.UTC(now.getUTCFullYear(),now.getUTCMonth()+1,1);
-        const pauseUntil=hasRetry?Date.now()+Math.min(3600000,retrySeconds*1000):nextMonth;
+        const seconds=rawRetry==null?NaN:Number(rawRetry);
+        const target=Number.isFinite(seconds)&&seconds>0?Date.now()+seconds*1000:Date.parse(rawRetry||'');
+        const hasRetry=Number.isFinite(target)&&target>Date.now();
+        // A 429 alone does not tell us whether the minute or monthly quota is exhausted.
+        const pauseUntil=hasRetry?Math.min(target,Date.now()+6*60*60*1000):Date.now()+6*60*60*1000;
         sockCache.until=pauseUntil;
-        const reason=hasRetry?'SockOdds minute request limit':'SockOdds monthly object allowance reached (or no retry window supplied)';
+        const reason=hasRetry?'SockOdds rate limit (Retry-After supplied)':'SockOdds HTTP 429: rate or quota exhausted, reset time unknown';
         return {events:[],rawEvents:0,configured:true,error:reason,retry_at:new Date(pauseUntil).toISOString()};
       }
       if(!r.ok)return {events:[],rawEvents:0,configured:true,error:'SockOdds HTTP '+r.status};
@@ -431,7 +431,17 @@ async function scan(sport){
     if(reason!=='comparable'&&rejectedExamples.length<3)rejectedExamples.push({fixture:b.home+' vs '+b.away,reason,books:[...b.books],outcomes:[...b.outcomeCounts].map(([book,count])=>({book,count}))});
   }
   const audited=cross.map(priceAudit).filter(Boolean).sort((a,b)=>b.roi_pct-a.roi_pct);
-  return {engine:ENGINE,scanned_at:new Date().toISOString(),providers,active_bookmakers:distinctBooks,active_bookmaker_count:distinctBooks.length,merged_games:buckets.length,cross_book_games:cross.length,comparable_markets:audited.length,validation_reasons:auditReasons,rejected_examples:rejectedExamples,closest_markets:audited.slice(0,5),comparisons:audited.slice(0,35),arbs:arbs.length,results:arbs,scan_scope:'Limited requests with cooldown on provider rate limits'};
+  const singles=buckets.filter(b=>b.books.size===1).sort((a,z)=>parseMs(a.time)-parseMs(z.time));
+  const singleGames=singles.slice(0,25).map(b=>{
+    const best=new Map();
+    for(const offer of b.offers)if(!best.has(offer.role)||offer.odds>best.get(offer.role).odds)best.set(offer.role,offer);
+    const quotes=[...best.values()].map(o=>({role:o.role,odds:o.odds,book:o.book}));
+    const byRole={};
+    for(const q of quotes)byRole[q.role]=[q];
+    return {fixture:b.home+' vs '+b.away,sport:b.sport,commence_time:b.time,
+      bookmaker_count:1,books:[...b.books],all_bookmaker_prices:byRole,best_odds:quotes};
+  });
+  return {engine:ENGINE,scanned_at:new Date().toISOString(),providers,active_bookmakers:distinctBooks,active_bookmaker_count:distinctBooks.length,merged_games:buckets.length,cross_book_games:cross.length,comparable_markets:audited.length,validation_reasons:auditReasons,rejected_examples:rejectedExamples,closest_markets:audited.slice(0,5),comparisons:audited.slice(0,35),single_book_games_total:singles.length,single_book_games:singleGames,arbs:arbs.length,results:arbs,scan_scope:'Limited requests with cooldown on provider rate limits'};
 }
 export default async function handler(req,res){
   if(req.method!=='GET'){res.setHeader('Allow','GET');return res.status(405).json({error:'Method not allowed'})}
