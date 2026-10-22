@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v33-visible-fixtures';
+const ENGINE='au-openbooks-v34-scan-reliability';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=30*60*1000;
 const BASE_HEADERS={
@@ -184,6 +184,7 @@ function entainCardSelections(card,h,a,sport){
 }
 
 async function entainBook(host,book,anchors,sport){
+  const deadline=Date.now()+42000;
   const metas=sport?ENTAIN_CATEGORIES.filter(x=>x.key===sport):ENTAIN_CATEGORIES;
   const headers={'Content-Type':'application/json','Origin':book==='Neds'?'https://www.neds.com.au':'https://www.ladbrokes.com.au','Referer':book==='Neds'?'https://www.neds.com.au/':'https://www.ladbrokes.com.au/'};
   const listed=[];const categoryErrors=[];
@@ -194,6 +195,7 @@ async function entainBook(host,book,anchors,sport){
   const selected=sport?metas.slice(0,3):[0,1,2].map(i=>metas[(slot*3+i)%metas.length]);
   const lists=[];
   for(const meta of selected){
+    if(Date.now()>deadline-18000)break;
     try{
       const qs=new URLSearchParams({category_ids:JSON.stringify([meta.id])});
       const data=await getJson(`https://${host}/v2/sport/event-request?${qs.toString()}`,headers,15000);
@@ -216,14 +218,16 @@ async function entainBook(host,book,anchors,sport){
   }
   const dedup=[...new Map(listed.filter(x=>x.id).map(x=>[x.id,x])).values()].sort((a,b)=>parseMs(a.time)-parseMs(b.time)).slice(0,8);
   const cards=[];
-  for(const x of dedup){
-    try{
+  // Two concurrent detail reads improve reliability while avoiding a request burst.
+  // Stop scheduling requests before the serverless function approaches its limit.
+  for(let i=0;i<dedup.length&&Date.now()<deadline-16000;i+=2){
+    const batch=dedup.slice(i,i+2);
+    const result=await Promise.allSettled(batch.map(async x=>{
       const card=await getJson(`https://${host}/v2/sport/event-card?id=${encodeURIComponent(x.id)}`,headers,16000);
-      cards.push({status:'fulfilled',value:{x,card}});
-    }catch(e){
-      cards.push({status:'rejected',reason:e});
-      if(/HTTP 429/.test(String(e?.message||e)))break;
-    }
+      return {x,card};
+    }));
+    result.forEach(r=>cards.push(r));
+    if(result.some(r=>r.status==='rejected'&&/HTTP 429/.test(String(r.reason?.message||r.reason))))break;
   }
   // Public provider schema metadata only; helps detect feed format changes.
   const representative=cards.find(r=>r.status==='fulfilled')?.value?.card;
@@ -390,24 +394,29 @@ function priceAudit(b){
 }
 async function scan(sport){
   const providers=[];
-  let pe=[];
-  try{pe=await pointsBet();providers.push({provider:'PointsBet AU',ok:true,events:pe.length})}
-  catch(e){providers.push({provider:'PointsBet AU',ok:false,events:0,error:String(e?.message||e).slice(0,200)})}
-
-  let neds={events:[],listed:0,cards:0,cardFailures:0,categoryErrors:[]};
-  let lads={events:[],listed:0,cards:0,cardFailures:0,categoryErrors:[]};
-  {
-    const [nr,lr]=await Promise.allSettled([
-      entainBook('api.neds.com.au','Neds',pe,sport),
-      entainBook('api.ladbrokes.com.au','Ladbrokes AU',pe,sport)
-    ]);
-    if(nr.status==='fulfilled'){neds=nr.value;providers.push({provider:'Neds',ok:true,events:neds.events.length,listed:neds.listed,cards:neds.cards,card_failures:neds.cardFailures,categories:neds.categories||[],schema_sample:neds.schema_sample,error:neds.categoryErrors.length?neds.categoryErrors.join(' | '):undefined})}
-    else providers.push({provider:'Neds',ok:false,events:0,error:String(nr.reason?.message||nr.reason).slice(0,200)});
-    if(lr.status==='fulfilled'){lads=lr.value;providers.push({provider:'Ladbrokes AU',ok:true,events:lads.events.length,listed:lads.listed,cards:lads.cards,card_failures:lads.cardFailures,categories:lads.categories||[],schema_sample:lads.schema_sample,error:lads.categoryErrors.length?lads.categoryErrors.join(' | '):undefined})}
-    else providers.push({provider:'Ladbrokes AU',ok:false,events:0,error:String(lr.reason?.message||lr.reason).slice(0,200)});
+  // Independent feeds run together; an unavailable bookmaker does not block others.
+  const [pr,nr,lr,sr]=await Promise.allSettled([
+    pointsBet(),
+    entainBook('api.neds.com.au','Neds',[],sport),
+    entainBook('api.ladbrokes.com.au','Ladbrokes AU',[],sport),
+    sockOdds()
+  ]);
+  const pe=pr.status==='fulfilled'?pr.value:[];
+  if(pr.status==='fulfilled')providers.push({provider:'PointsBet AU',ok:true,events:pe.length});
+  else providers.push({provider:'PointsBet AU',ok:false,events:0,error:String(pr.reason?.message||pr.reason).slice(0,200)});
+  const empty={events:[],listed:0,cards:0,cardFailures:0,categoryErrors:[]};
+  const neds=nr.status==='fulfilled'?nr.value:empty;
+  const lads=lr.status==='fulfilled'?lr.value:empty;
+  for(const [name,result,values] of [['Neds',nr,neds],['Ladbrokes AU',lr,lads]]){
+    if(result.status==='fulfilled')providers.push({
+      provider:name,ok:!values.categoryErrors?.length,events:values.events.length,
+      listed:values.listed,cards:values.cards,card_failures:values.cardFailures,
+      categories:values.categories||[],schema_sample:values.schema_sample,
+      error:values.categoryErrors?.length?values.categoryErrors.join(' | '):undefined
+    });
+    else providers.push({provider:name,ok:false,events:0,error:String(result.reason?.message||result.reason).slice(0,200)});
   }
-
-  const sock=await sockOdds();
+  const sock=sr.status==='fulfilled'?sr.value:{events:[],rawEvents:0,configured:true,error:String(sr.reason?.message||sr.reason)};
   providers.unshift({provider:'SockOdds',ok:!sock.error,events:sock.events.length,listed:sock.rawEvents??0,league:sock.league,configured:sock.configured,bookmakers:sock.bookmakers??[],bookmaker_count:sock.bookmakers?.length??0,retry_at:sock.retry_at,error:sock.error});
   let all=[...pe,...neds.events,...lads.events,...sock.events];
   if(sport)all=all.filter(e=>e.sport===sport);
