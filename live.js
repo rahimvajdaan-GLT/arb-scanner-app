@@ -316,9 +316,17 @@ async function scanLive() {
     const feeds=Array.isArray(data.providers)?data.providers:[];
     const working=feeds.filter(p=>Number(p.events)>0);
     const errors=feeds.filter(p=>p.error);
-    liveEls.status.textContent=!working.length?'● Odds sources unavailable':errors.length?'● Partial odds coverage':'● Live prices · Pre-match';
+    liveEls.status.textContent=!working.length?'● Odds sources unavailable':errors.length?'● Partial odds coverage':'● Recent bookmaker quotes · Pre-match';
   } catch (error) {
     if (error.name === 'AbortError') return;
+    // Invalidated scans must never repaint historical positive results.
+    latestEvents = [];
+    latestScanTime = null;
+    liveEls.metricCount.textContent = '—';
+    liveEls.metricBestRoi.textContent = '—';
+    liveEls.metricBestProfit.textContent = '—';
+    liveEls.metricLastScan.textContent = '—';
+    liveEls.lastUpdated.textContent = 'Scan unavailable';
     liveEls.message.textContent = error.message;
     window.dispatchEvent(new CustomEvent('arb:scan-error', {detail:error.message}));
     liveEls.status.textContent = '● Error';
