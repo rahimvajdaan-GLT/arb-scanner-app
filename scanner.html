@@ -21,6 +21,13 @@ window.addEventListener('load',()=>{const b=document.getElementById('scanLiveBtn
    if(id!==serial)return;
    lines.push('Engine: '+(data.engine||'unknown'));
    lines.push('Games parsed: '+(data.merged_games??0)+' | Cross-book matches: '+(data.cross_book_games??0)+' | True positive arbs: '+(data.arbs??0));
+   if(Array.isArray(data.closest_markets)){
+     lines.push('Compatible markets checked: '+(data.comparable_markets??0));
+     for(const m of data.closest_markets.slice(0,3)){
+       const prices=(m.best_odds||[]).map(o=>o.role+' '+Number(o.odds).toFixed(2)+' @ '+o.book).join(' / ');
+       lines.push('Closest: '+m.fixture+' | theoretical ROI '+Number(m.roi_pct).toFixed(2)+'% | '+prices);
+     }
+   }
    const providers=Array.isArray(data.providers)?data.providers:[];
    for(const p of providers){
     let message=p.provider+': '+(p.events??0)+' usable games';
