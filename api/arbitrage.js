@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v28-all-bookmaker-prices';
+const ENGINE='au-openbooks-v29-bookmaker-identity';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=90*60*1000;
 const BASE_HEADERS={
@@ -54,8 +54,26 @@ function teams(name){const s=String(name||'').trim();const m=s.match(/^(.+?)\s+(
 function dec(v){const n=Number(v);return Number.isFinite(n)&&n>1?n:null}
 function role(name,h,a,homeAway){if(homeAway==='HOME')return'home';if(homeAway==='AWAY')return'away';if(same(name,h))return'home';if(same(name,a))return'away';if(/^(draw|tie)$/i.test(String(name||'')))return'draw';return null}
 function sportOf(s){s=String(s||'').toLowerCase();if(/afl|australian/.test(s))return'afl';if(/cricket|big bash|ipl/.test(s))return'cricket';if(/basketball|nba|nbl/.test(s))return'basketball';if(/ice hockey|nhl/.test(s))return'nhl';if(/soccer|premier league|epl/.test(s))return'soccer';if(/baseball|mlb/.test(s))return'baseball';if(/nrl|rugby league/.test(s))return'nrl';if(/american football|nfl/.test(s))return'nfl';if(/tennis|atp|wta/.test(s))return'tennis';return'other'}
+function bookmakerName(value){
+ const raw=String(value||'').trim(),key=raw.toLowerCase().replace(/[^a-z0-9]/g,'');
+ if(!key)return '';
+ const known={
+  pointsbet:'PointsBet AU',pointsbetau:'PointsBet AU',
+  sportsbet:'Sportsbet',sportsbetau:'Sportsbet',
+  tab:'TAB',tabau:'TAB',tabcomau:'TAB',
+  neds:'Neds',nedsau:'Neds',
+  ladbrokes:'Ladbrokes AU',ladbrokesau:'Ladbrokes AU',
+  unibet:'Unibet AU',unibetau:'Unibet AU',
+  bet365:'bet365 AU',bet365au:'bet365 AU',
+  tabtouch:'TABtouch',tabtouchau:'TABtouch',
+  betright:'Bet Right',betrightau:'Bet Right',
+  betfair:'Betfair Exchange',betfairexchange:'Betfair Exchange'
+ };
+ return known[key]||raw;
+}
 function eventObj(sport,h,a,time,book,sels,source){
   const iso=firstTime(time),tm=parseMs(iso);if(!h||!a||!Number.isFinite(tm)||tm<=Date.now()+FUTURE_BUFFER_MS)return null;
+  book=bookmakerName(book);if(!book)return null;
   const best=new Map();
   for(const s of sels||[]){const o=dec(s.odds),r=s.role||role(s.name,h,a,s.homeAway);if(r&&o&&(!best.has(r)||o>best.get(r).odds))best.set(r,{market:'h2h',role:r,odds:o,point:null,book})}
   if(best.size<2)return null;
