@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v34-scan-reliability';
+const ENGINE='au-openbooks-v35-settlement-safe';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=30*60*1000;
 const BASE_HEADERS={
@@ -91,6 +91,9 @@ function eventObj(sport,h,a,time,book,sels,source){
   const best=new Map();
   for(const s of sels||[]){const o=dec(s.odds),r=s.role||role(s.name,h,a,s.homeAway);if(r&&o&&(!best.has(r)||o>best.get(r).odds))best.set(r,{market:'h2h',role:r,odds:o,point:null,book})}
   if(best.size<2)return null;
+  // A full-time soccer result requires home / draw / away. A two-price card
+  // may be draw-no-bet or qualification and cannot be equated with 1X2.
+  if(sport==='soccer'&&(!best.has('home')||!best.has('draw')||!best.has('away')))return null;
   return{sport,home:h,away:a,time:iso,book,offers:[...best.values()],outcomeCount:best.size,source};
 }
 
@@ -107,7 +110,7 @@ async function pointsBet(){
     const aa=typeof detail?.awayTeam==='string'?detail.awayTeam:(detail?.awayTeam?.name||head?.awayTeam?.name||head?.awayTeam);
     const ta=hh&&aa?{home:hh,away:aa}:teams(detail?.name||head?.name);if(!ta)continue;
     const ms=Array.isArray(detail?.fixedOddsMarkets)?detail.fixedOddsMarkets:[];
-    const m=ms.find(x=>/match result|match betting|head to head|moneyline|winner/i.test(String(x?.name||'')));if(!m)continue;
+    const m=ms.find(x=>/^(match result|match betting|head to head|head-to-head|moneyline|match winner|winner|full time result|full-time result|game winner)$/i.test(String(x?.name||'').trim())&&x?.isOpenForBetting!==false);if(!m)continue;
     const sels=objValues(m?.outcomes).filter(o=>o?.isOpenForBetting!==false).map(o=>({name:o?.name,odds:o?.price}));
     const item=eventObj(sportOf(`${head?.sportKey||''} ${head?.competitionName||''} ${detail?.competitionName||''}`),ta.home,ta.away,detail?.startsAt||head?.startsAt,'PointsBet AU',sels,'pointsbet');
     if(item)out.push(item);
