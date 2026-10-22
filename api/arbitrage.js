@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v23-validation-audit';
+const ENGINE='au-openbooks-v24-compatible-prices';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=90*60*1000;
 const BASE_HEADERS={
@@ -185,14 +185,28 @@ function arb(b){
   if(b.books.size<2)return null;
   // Two-way and three-way match-winner markets have different settlement rules.
   // Never combine them into a synthetic arbitrage.
-  const counts=[...b.outcomeCounts.values()];
-  if(counts.some(c=>c!==counts[0]))return null;
-  const roles=counts[0]===3?['home','draw','away']:['home','away'];
-  const compatible=b.offers.filter(o=>b.outcomeCounts.get(o.book)===roles.length);
-  const best={};for(const o of compatible)if(!best[o.role]||o.odds>best[o.role].odds)best[o.role]=o;if(roles.some(r=>!best[r]))return null;
-  const sels=roles.map(r=>({name:r==='home'?b.home:r==='away'?b.away:'Draw',point:null,best_price:Number(best[r].odds),best_bookmaker:best[r].book}));
-  if(new Set(sels.map(x=>x.best_bookmaker)).size<2)return null;
-  const inv=sels.reduce((s,x)=>s+1/x.best_price,0);if(!Number.isFinite(inv)||inv>=1)return null;const roi=(1/inv-1)*100;
+  // Do not discard an entire fixture when providers quote different settlement markets.
+  // Evaluate two-way and three-way pools independently, never mix their selections.
+  const candidates=[];
+  for(const count of [2,3]){
+    const roles=count===3?['home','draw','away']:['home','away'];
+    const allowed=new Set([...b.outcomeCounts].filter(([,n])=>n===count).map(([name])=>name));
+    if(allowed.size<2)continue;
+    const best={};
+    for(const offer of b.offers){
+      if(!allowed.has(offer.book)||!roles.includes(offer.role))continue;
+      if(!best[offer.role]||offer.odds>best[offer.role].odds)best[offer.role]=offer;
+    }
+    if(roles.some(r=>!best[r]))continue;
+    const sels=roles.map(r=>({name:r==='home'?b.home:r==='away'?b.away:'Draw',point:null,best_price:Number(best[r].odds),best_bookmaker:best[r].book}));
+    if(new Set(sels.map(x=>x.best_bookmaker)).size<2)continue;
+    const inv=sels.reduce((sum,x)=>sum+1/x.best_price,0);
+    if(Number.isFinite(inv)&&inv<1)candidates.push({sels,inv});
+  }
+  if(!candidates.length)return null;
+  const {sels,inv}=candidates.sort((a,z)=>a.inv-z.inv)[0];
+  const roi=(1/inv-1)*100;
+
   return{event_id:`${b.sport}-${norm(b.home).replace(/\s/g,'')}-${norm(b.away).replace(/\s/g,'')}-${Math.round(parseMs(b.time)/60000)}`,sport_key:b.sport,home_team:b.home,away_team:b.away,commence_time:b.time,market_type:'h2h',source_type:ENGINE,is_arb:true,arb_pct:Number(roi.toFixed(3)),selections:sels,optimal_stakes:sels.map(x=>({name:x.name,point:null,price:x.best_price,bookmaker:x.best_bookmaker,stake:((1/x.best_price)/inv)*100}))};
 }
 
@@ -254,19 +268,22 @@ async function sockOdds(){
 
 function priceAudit(b){
  if(b.books.size<2)return null;
- const counts=[...b.outcomeCounts.values()];
- if(!counts.length||counts.some(c=>c!==counts[0])||![2,3].includes(counts[0]))return null;
- const roles=counts[0]===3?['home','draw','away']:['home','away'];
- const best=roles.map(role=>{
-   const offers=b.offers.filter(o=>o.role===role&&b.outcomeCounts.get(o.book)===counts[0]);
-   return offers.sort((a,z)=>z.odds-a.odds)[0];
- });
- if(best.some(x=>!x))return null;
- const inv=best.reduce((sum,o)=>sum+1/o.odds,0);
- if(!Number.isFinite(inv))return null;
+ const candidates=[];
+ for(const count of [2,3]){
+   const eligible=[...b.outcomeCounts].filter(([,n])=>n===count).map(([name])=>name);
+   if(eligible.length<2)continue;
+   const roles=count===3?['home','draw','away']:['home','away'];
+   const best=roles.map(role=>b.offers.filter(o=>eligible.includes(o.book)&&o.role===role).sort((a,z)=>z.odds-a.odds)[0]);
+   if(best.some(o=>!o))continue;
+   if(new Set(best.map(o=>o.book)).size<2)continue;
+   const inv=best.reduce((sum,o)=>sum+1/o.odds,0);
+   if(Number.isFinite(inv))candidates.push({inv,count,best});
+ }
+ if(!candidates.length)return null;
+ const {inv,count,best}=candidates.sort((a,z)=>a.inv-z.inv)[0];
  return {fixture:b.home+' vs '+b.away,sport:b.sport,
-   roi_pct:Number(((1/inv-1)*100).toFixed(3)),outcomes:counts[0],
-   books:[...b.books],best_odds:best.map(o=>({role:o.role,odds:o.odds,book:o.book}))};
+   roi_pct:Number(((1/inv-1)*100).toFixed(3)),outcomes:count,
+   books:[...new Set(best.map(o=>o.book))],best_odds:best.map(o=>({role:o.role,odds:o.odds,book:o.book}))};
 }
 async function scan(sport){
   const providers=[];
