@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v25-league-rotation';
+const ENGINE='au-openbooks-v26-sockodds-safe';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=90*60*1000;
 const BASE_HEADERS={
@@ -217,14 +217,12 @@ async function sockOdds(){
   const key=process.env.SOCKODDS_API_KEY;
   if(!key)return {events:[],rawEvents:0,configured:false,error:'SOCKODDS_API_KEY not configured on this deployment'};
   if(sockCache.promise&&sockCache.until>Date.now())return sockCache.promise;
-  sockCache.until=Date.now()+20*60*1000;
+  sockCache.until=Date.now()+5*60*1000;
   sockCache.promise=(async()=>{
     const events=[];let rawEvents=0;const observed=new Set();
     try{
-      // Rotate one popular league per 20-minute window to conserve free-tier objects.
-      const slot=Math.floor(Date.now()/(20*60*1000));
-      const selectedLeague=SOCK_LEAGUES[slot%SOCK_LEAGUES.length];
-      const params=new URLSearchParams({league:selectedLeague,markets:'winner',regions:'au',group_by:'bookmaker',limit:'30',starts_after:new Date().toISOString()});
+      // Use the previously verified query; league-filtered requests returned HTTP 403.
+      const params=new URLSearchParams({markets:'winner',regions:'au',group_by:'bookmaker',limit:'20',starts_after:new Date().toISOString()});
       const c=new AbortController(),timer=setTimeout(()=>c.abort(),13000);
       let r;
       try{r=await fetch('https://api.sockodds.com/v1/odds?'+params,{headers:{Authorization:'Bearer '+key,Accept:'application/json'},signal:c.signal})}
@@ -261,7 +259,7 @@ async function sockOdds(){
           if(item){events.push(item);observed.add(book)}
         }
       }
-      return {events,rawEvents,bookmakers:[...observed],league:selectedLeague,configured:true};
+      return {events,rawEvents,bookmakers:[...observed],configured:true};
     }catch(e){return {events:[],rawEvents,configured:true,error:'SockOdds request/parser: '+String(e?.message||e).slice(0,160)}}
   })();
   return sockCache.promise;
