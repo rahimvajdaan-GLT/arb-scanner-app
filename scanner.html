@@ -102,6 +102,7 @@ window.addEventListener('load',()=>{const b=document.getElementById('scanLiveBtn
     if(p.categories?.length)message+=' | categories '+p.categories.join(', ');
     if(p.cards!==undefined)message+=' | cards '+p.cards;
     if(p.card_failures!==undefined)message+=' | card failures '+p.card_failures;
+    if(p.parser_stats)message+=' | parsed '+(p.parser_stats.accepted||0)+' | rejected markets '+(p.parser_stats.no_accepted_match_market||0)+' | invalid fixture '+(p.parser_stats.invalid_fixture_after_parsing||0);
     if(p.price_failures!==undefined)message+=' | price failures '+p.price_failures;
     if(p.error)message+=' | ERROR: '+String(p.error).slice(0,350);
     if(p.retry_at)message+=' | retry after '+p.retry_at;
