@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v24-compatible-prices';
+const ENGINE='au-openbooks-v25-league-rotation';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=90*60*1000;
 const BASE_HEADERS={
@@ -211,18 +211,20 @@ function arb(b){
 }
 
 
+const SOCK_LEAGUES=['nfl','nba','nhl','epl','atp','mlb','la_liga','wta','bundesliga','serie_a'];
 const sockCache={until:0,promise:null};
 async function sockOdds(){
   const key=process.env.SOCKODDS_API_KEY;
   if(!key)return {events:[],rawEvents:0,configured:false,error:'SOCKODDS_API_KEY not configured on this deployment'};
   if(sockCache.promise&&sockCache.until>Date.now())return sockCache.promise;
-  sockCache.until=Date.now()+5*60*1000;
+  sockCache.until=Date.now()+20*60*1000;
   sockCache.promise=(async()=>{
     const events=[];let rawEvents=0;const observed=new Set();
     try{
-      // v1 serves /odds with either grouped markets or grouped bookmakers.
-      // One small unfiltered event page avoids guessing unavailable league IDs.
-      const params=new URLSearchParams({markets:'winner',regions:'au',group_by:'bookmaker',limit:'20',starts_after:new Date().toISOString()});
+      // Rotate one popular league per 20-minute window to conserve free-tier objects.
+      const slot=Math.floor(Date.now()/(20*60*1000));
+      const selectedLeague=SOCK_LEAGUES[slot%SOCK_LEAGUES.length];
+      const params=new URLSearchParams({league:selectedLeague,markets:'winner',regions:'au',group_by:'bookmaker',limit:'30',starts_after:new Date().toISOString()});
       const c=new AbortController(),timer=setTimeout(()=>c.abort(),13000);
       let r;
       try{r=await fetch('https://api.sockodds.com/v1/odds?'+params,{headers:{Authorization:'Bearer '+key,Accept:'application/json'},signal:c.signal})}
@@ -238,7 +240,7 @@ async function sockOdds(){
         const pair=hn&&an?{home:hn,away:an}:teams(ev.name);
         if(!pair)continue;
         const league=String(ev.league?.key||ev.league||'');
-        const sp=/afl/i.test(league)?'afl':/nrl|rlwc|rugby_league/i.test(league)?'nrl':sportOf(league);
+        const sp=/afl/i.test(league)?'afl':/nrl|rlwc|rugby_league/i.test(league)?'nrl':/^(epl|la_liga|bundesliga|serie_a|ligue_1|mls|champions_league)$/.test(league)?'soccer':/^(atp|wta)$/.test(league)?'tennis':/^(nba|nbl)$/.test(league)?'basketball':/^(nfl|ncaaf)$/.test(league)?'nfl':/^(nhl)$/.test(league)?'nhl':/^(mlb)$/.test(league)?'baseball':sportOf(league);
         for(const bm of objValues(ev.bookmakers)){
           const book=String(bm.name||bm.key||'').trim();if(!book)continue;
           const selections=[];
@@ -259,7 +261,7 @@ async function sockOdds(){
           if(item){events.push(item);observed.add(book)}
         }
       }
-      return {events,rawEvents,bookmakers:[...observed],configured:true};
+      return {events,rawEvents,bookmakers:[...observed],league:selectedLeague,configured:true};
     }catch(e){return {events:[],rawEvents,configured:true,error:'SockOdds request/parser: '+String(e?.message||e).slice(0,160)}}
   })();
   return sockCache.promise;
@@ -305,7 +307,7 @@ async function scan(sport){
   }
 
   const sock=await sockOdds();
-  providers.unshift({provider:'SockOdds',ok:!sock.error,events:sock.events.length,listed:sock.rawEvents??0,configured:sock.configured,bookmakers:sock.bookmakers??[],error:sock.error});
+  providers.unshift({provider:'SockOdds',ok:!sock.error,events:sock.events.length,listed:sock.rawEvents??0,league:sock.league,configured:sock.configured,bookmakers:sock.bookmakers??[],error:sock.error});
   let all=[...pe,...neds.events,...lads.events,...sock.events];
   if(sport)all=all.filter(e=>e.sport===sport);
   const buckets=merge(all);
