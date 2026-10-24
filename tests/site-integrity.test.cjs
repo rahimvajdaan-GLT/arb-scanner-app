@@ -23,12 +23,12 @@ test('all local navigation and static asset links resolve inside the project',()
   }
  }
 });
-test('scanner renders a comparison board and one scan button',()=>{
+test('scanner renders positive-only results and a transparent scan summary',()=>{
  const html=read('scanner.html'),js=read('live.js');
- for(const id of ['scanLiveBtn','liveSport','liveMarket','liveStake','liveBooks','comparisonRows','comparisonCount','liveResults','metricCount','feedDiagnostics'])
+ for(const id of ['scanLiveBtn','liveSport','liveMarket','liveStake','liveBooks','scanCoverageText','scanCoverageCount','feedDetails','liveResults','metricCount','feedDiagnostics'])
  assert.ok(html.includes('id="'+id+'"'),'Missing UI control '+id);
- assert.ok(js.includes("window.dispatchEvent(new CustomEvent('arb:scan'"),'scan results not connected to price board');
- assert.ok(html.includes("window.addEventListener('arb:scan'"),'price board not listening');
+ assert.ok(js.includes("window.dispatchEvent(new CustomEvent('arb:scan'"),'scan results not connected to positive result cards');
+ assert.ok(html.includes("window.addEventListener('arb:scan'"),'coverage summary not listening');
  assert.ok(js.includes("params.set('debug', '1')"),'required diagnostics missing');
  assert.ok(!html.includes("fetch('/api/arbitrage?"),'diagnostics must not fetch separately');
 });
