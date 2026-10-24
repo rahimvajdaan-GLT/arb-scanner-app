@@ -186,7 +186,8 @@ test('extra feed only runs on user opt-in; auto refresh cannot drain free quota'
  const page=fs.readFileSync(path.join(__dirname,'../scanner.html'),'utf8');
  assert.match(page,/id="liveExtraFeed"/);
  assert.match(front,/include_krok/);
- assert.match(front,/liveEls.extraFeed\.checked\) liveEls.autoRefresh.checked = false/);
+ assert.match(front,/if \(liveEls\.extraFeed\.checked\) \{/);
+ assert.match(front,/liveEls\.autoRefresh\.checked = false/);
  assert.match(page,/live\.js\?v=46/);
 });
 
@@ -310,7 +311,8 @@ test('PointsBet diagnostic supplies counts instead of silently hiding zero-odds 
  const front=fs.readFileSync(path.join(__dirname,'../scanner.html'),'utf8');
  assert.match(backend,/candidates:eligible.length/);
  assert.match(backend,/rejected:points.rejected/);
- assert.match(front,/p.market_examples/);
+ assert.match(front,/p\.rejected/);
+ assert.match(front,/id="feedDetails"/);
 });
 
 test('PointsBet tennis accepts full Match Winner with exact fixture suffix',()=>{
