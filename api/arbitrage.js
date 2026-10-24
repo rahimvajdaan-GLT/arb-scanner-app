@@ -1,6 +1,10 @@
-const ENGINE='au-openbooks-v41-third-provider';
+const ENGINE='au-openbooks-v42-broader-sampling';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=30*60*1000;
+// Each scan is a bounded SAMPLE, not an exhaustive market-wide search.
+const ENTAIN_CARDS_PER_BOOK=4;
+const ENTAIN_CARDS_FILTERED=6;
+const SAMPLE_ROTATION_MS=15*60*1000;
 const BASE_HEADERS={
   'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36',
   'Accept':'application/json, text/plain, */*',
@@ -97,11 +101,28 @@ function eventObj(sport,h,a,time,book,sels,source){
   return{sport,home:h,away:a,time:iso,book,offers:[...best.values()],outcomeCount:best.size,source};
 }
 
-async function pointsBet(){
+function sampleRotating(rows,size,now=Date.now(),period=SAMPLE_ROTATION_MS){
+  if(!Array.isArray(rows)||!rows.length||size<=0)return [];
+  const count=Math.min(rows.length,size);
+  const offset=(Math.floor(now/period)*count)%rows.length;
+  return Array.from({length:count},(_,i)=>rows[(offset+i)%rows.length]);
+}
+function samplePreferred(rows,size,anchors=[],now=Date.now()){
+  if(!Array.isArray(rows)||!rows.length)return [];
+  // Quotes for the same event already seen at another bookmaker improve
+  // cross-book comparison coverage, without enlarging the request budget.
+  const matched=rows.filter(row=>anchors.some(a=>sameFixture(row,a))).slice(0,size);
+  const seen=new Set(matched.map(row=>row.id));
+  const remaining=rows.filter(row=>!seen.has(row.id));
+  return [...matched,...sampleRotating(remaining,size-matched.length,now)];
+}
+async function pointsBet(sport=''){
   const h={'Origin':'https://pointsbet.com.au','Referer':'https://pointsbet.com.au/'};
   const feed=await getJson('https://api.au.pointsbet.com/api/v2/events/nextup?v2Limit=80',h);
   const rows=Array.isArray(feed?.events)?feed.events:(Array.isArray(feed)?feed:[]);
-  const upcoming=rows.filter(e=>e?.key&&e?.isLive!==true&&parseMs(e?.startsAt)>Date.now()+FUTURE_BUFFER_MS ).slice(0,6);
+  const eligible=rows.filter(e=>e?.key&&e?.isLive!==true&&parseMs(e?.startsAt)>Date.now()+FUTURE_BUFFER_MS &&
+     (!sport||sportOf(String(e?.sportKey||'')+' '+String(e?.competitionName||''))===sport));
+  const upcoming=sampleRotating(eligible,6);
   const details=await Promise.allSettled(upcoming.map(head=>getJson(`https://api.au.pointsbet.com/api/mes/v3/events/${encodeURIComponent(head.key)}`,h,16000).then(detail=>({head,detail}))));
   const out=[];
   for(const r of details){
@@ -282,7 +303,9 @@ async function entainBook(host,book,anchors,sport){
       if(time&&parseMs(time)>Date.now()+FUTURE_BUFFER_MS)listed.push({meta,e,ta,time,id:String(e?.id??e?.event_id??e?.eventId??'')});
     }
   }
-  const dedup=[...new Map(listed.filter(x=>x.id).map(x=>[x.id,x])).values()].sort((a,b)=>parseMs(a.time)-parseMs(b.time)).slice(0,2);
+  const eligible=[...new Map(listed.filter(x=>x.id).map(x=>[x.id,x])).values()].sort((a,b)=>parseMs(a.time)-parseMs(b.time));
+  const budget=sport?ENTAIN_CARDS_FILTERED:ENTAIN_CARDS_PER_BOOK;
+  const dedup=samplePreferred(eligible,budget,anchors);
   const cards=[];
   // Two concurrent detail reads improve reliability while avoiding a request burst.
   // Stop scheduling requests before the serverless function approaches its limit.
@@ -344,7 +367,7 @@ async function entainBook(host,book,anchors,sport){
     if(item){events.push(item);parser_stats.accepted++}
     else parser_stats.invalid_fixture_after_parsing++;
   }
-  return{events,listed:listed.length,cards:cards.length,cardFailures,parser_stats,rejected_card_samples,categoryErrors,categories:selected.map(x=>x.key),schema_sample};
+  return{events,listed:listed.length,cards:cards.length,cardFailures,parser_stats,rejected_card_samples,categoryErrors,categories:selected.map(x=>x.key),schema_sample,sample_budget:budget,sample_window:'rotates every 15 min'};
 }
 
 function merge(events){
@@ -419,7 +442,7 @@ async function sockOdds(){
     const events=[];let rawEvents=0;const observed=new Set();
     try{
       // Use the previously verified query; league-filtered requests returned HTTP 403.
-      const params=new URLSearchParams({markets:'winner',regions:'au',group_by:'bookmaker',limit:'5',starts_after:new Date().toISOString()});
+      const params=new URLSearchParams({markets:'winner',regions:'au',group_by:'bookmaker',limit:'10',starts_after:new Date().toISOString()});
       const c=new AbortController(),timer=setTimeout(()=>c.abort(),13000);
       let r;
       try{r=await fetch('https://api.sockodds.com/v1/odds?'+params,{headers:{Authorization:'Bearer '+key,Accept:'application/json'},signal:c.signal})}
@@ -653,7 +676,7 @@ async function scan(sport,includeKrok=false,includeOdds=false){
   const providers=[];
   // Independent feeds run together; an unavailable bookmaker does not block others.
   const [pr,nr,lr,sr,kr,or]=await Promise.allSettled([
-    pointsBet(),
+    pointsBet(sport),
     entainBook('api.neds.com.au','Neds',[],sport),
     entainBook('api.ladbrokes.com.au','Ladbrokes AU',[],sport),
     sockOdds(),
@@ -669,7 +692,7 @@ async function scan(sport,includeKrok=false,includeOdds=false){
   for(const [name,result,values] of [['Neds',nr,neds],['Ladbrokes AU',lr,lads]]){
     if(result.status==='fulfilled')providers.push({
       provider:name,ok:!values.categoryErrors?.length,events:values.events.length,
-      listed:values.listed,cards:values.cards,card_failures:values.cardFailures,parser_stats:values.parser_stats,
+      listed:values.listed,cards:values.cards,sample_budget:values.sample_budget,card_failures:values.cardFailures,parser_stats:values.parser_stats,
       rejected_card_samples:values.rejected_card_samples,schema_sample:values.schema_sample,
       categories:values.categories||[],
       error:values.categoryErrors?.length?values.categoryErrors.join(' | '):undefined
@@ -677,7 +700,7 @@ async function scan(sport,includeKrok=false,includeOdds=false){
     else providers.push({provider:name,ok:false,events:0,error:String(result.reason?.message||result.reason).slice(0,200)});
   }
   const sock=sr.status==='fulfilled'?sr.value:{events:[],rawEvents:0,configured:true,error:String(sr.reason?.message||sr.reason)};
-  providers.unshift({provider:'SockOdds',ok:!sock.error,events:sock.events.length,listed:sock.rawEvents??0,league:sock.league,configured:sock.configured,bookmakers:sock.bookmakers??[],bookmaker_count:sock.bookmakers?.length??0,retry_at:sock.retry_at,error:sock.error});
+  providers.unshift({provider:'SockOdds',ok:!sock.error,events:sock.events.length,listed:sock.rawEvents??0,limit:10,league:sock.league,configured:sock.configured,bookmakers:sock.bookmakers??[],bookmaker_count:sock.bookmakers?.length??0,retry_at:sock.retry_at,error:sock.error});
   const krok=kr.status==='fulfilled'?kr.value:{events:[],configured:!!process.env.KROK_ODDS_API_KEY,error:'Krok integration unavailable'};
   if(includeKrok)providers.push({provider:'Krok Odds (optional)',ok:!krok.error,events:krok.events.length,listed:krok.listed??0,configured:krok.configured,bookmakers:krok.bookmakers??[],stale:krok.stale??0,slug:krok.slug,error:krok.error});
   const third=or.status==='fulfilled'?or.value:{events:[],configured:!!process.env.THE_ODDS_API_KEY,error:'The Odds API request unavailable'};
@@ -715,7 +738,7 @@ async function scan(sport,includeKrok=false,includeOdds=false){
     return {fixture:b.home+' vs '+b.away,sport:b.sport,commence_time:b.time,
       bookmaker_count:1,books:[...b.books],all_bookmaker_prices:byRole,best_odds:quotes};
   });
-  return {engine:ENGINE,scanned_at:new Date().toISOString(),providers,active_bookmakers:distinctBooks,active_bookmaker_count:distinctBooks.length,merged_games:buckets.length,cross_book_games:cross.length,comparable_markets:audited.length,validation_reasons:auditReasons,rejected_examples:rejectedExamples,closest_markets:audited.slice(0,5),comparisons:audited.slice(0,35),single_book_games_total:singles.length,single_book_games:singleGames,arbs:arbs.length,results:arbs,scan_scope:'Limited requests with cooldown on provider rate limits'};
+  return {engine:ENGINE,scanned_at:new Date().toISOString(),providers,active_bookmakers:distinctBooks,active_bookmaker_count:distinctBooks.length,merged_games:buckets.length,cross_book_games:cross.length,comparable_markets:audited.length,validation_reasons:auditReasons,rejected_examples:rejectedExamples,closest_markets:audited.slice(0,5),comparisons:audited.slice(0,35),single_book_games_total:singles.length,single_book_games:singleGames,arbs:arbs.length,results:arbs,scan_scope:'Sampled fixtures only — not exhaustive. Neds/Ladbrokes rotate event cards every 15 minutes; SockOdds checks at most 10 event pages. Other live providers vary by quota.'};
 }
 export default async function handler(req,res){
   if(req.method!=='GET'){res.setHeader('Allow','GET');return res.status(405).json({error:'Method not allowed'})}
