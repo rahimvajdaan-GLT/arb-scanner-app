@@ -121,22 +121,30 @@ async function pointsBet(sport=''){
   const feed=await getJson('https://api.au.pointsbet.com/api/v2/events/nextup?v2Limit=80',h);
   const rows=Array.isArray(feed?.events)?feed.events:(Array.isArray(feed)?feed:[]);
   const eligible=rows.filter(e=>e?.key&&e?.isLive!==true&&parseMs(e?.startsAt)>Date.now()+FUTURE_BUFFER_MS &&
-     (!sport||sportOf(String(e?.sportKey||'')+' '+String(e?.competitionName||''))===sport));
+    (!sport||sportOf(String(e?.sportKey||'')+' '+String(e?.competitionName||''))===sport));
   const upcoming=sampleRotating(eligible,6);
   const details=await Promise.allSettled(upcoming.map(head=>getJson(`https://api.au.pointsbet.com/api/mes/v3/events/${encodeURIComponent(head.key)}`,h,16000).then(detail=>({head,detail}))));
-  const out=[];
+  const out=[],rejected={missing_teams:0,no_full_match_market:0,invalid_prices:0};
+  let failures=0;const market_examples=[];
   for(const r of details){
-    if(r.status!=='fulfilled')continue;const{head,detail}=r.value;
+    if(r.status!=='fulfilled'){failures++;continue}
+    const{head,detail}=r.value;
     const hh=typeof detail?.homeTeam==='string'?detail.homeTeam:(detail?.homeTeam?.name||head?.homeTeam?.name||head?.homeTeam);
     const aa=typeof detail?.awayTeam==='string'?detail.awayTeam:(detail?.awayTeam?.name||head?.awayTeam?.name||head?.awayTeam);
-    const ta=hh&&aa?{home:hh,away:aa}:teams(detail?.name||head?.name);if(!ta)continue;
+    const ta=hh&&aa?{home:hh,away:aa}:teams(detail?.name||head?.name);
+    if(!ta){rejected.missing_teams++;continue}
     const ms=Array.isArray(detail?.fixedOddsMarkets)?detail.fixedOddsMarkets:[];
-    const m=ms.find(x=>/^(match result|match betting|head to head|head-to-head|moneyline|match winner|winner|full time result|full-time result|game winner)$/i.test(String(x?.name||'').trim())&&x?.isOpenForBetting!==false);if(!m)continue;
+    const m=ms.find(x=>/^(match result|match betting|head to head|head-to-head|moneyline|match winner|winner|full time result|full-time result|game winner)$/i.test(String(x?.name||'').trim())&&x?.isOpenForBetting!==false);
+    if(!m){
+      rejected.no_full_match_market++;
+      if(market_examples.length<2)market_examples.push(ms.map(x=>String(x?.name||'')).filter(Boolean).slice(0,8));
+      continue;
+    }
     const sels=objValues(m?.outcomes).filter(o=>o?.isOpenForBetting!==false).map(o=>({name:o?.name,odds:o?.price}));
     const item=eventObj(sportOf(`${head?.sportKey||''} ${head?.competitionName||''} ${detail?.competitionName||''}`),ta.home,ta.away,detail?.startsAt||head?.startsAt,'PointsBet AU',sels,'pointsbet');
-    if(item)out.push(item);
+    if(item)out.push(item);else rejected.invalid_prices++;
   }
-  return out;
+  return {events:out,listed:rows.length,candidates:eligible.length,cards:details.length,card_failures:failures,rejected,market_examples};
 }
 
 function entainDecimal(x){
@@ -717,8 +725,11 @@ async function scan(sport,includeKrok=false,includeOdds=false){
     krokTask,
     oddsTask
   ]);
-  const pe=pr.status==='fulfilled'?pr.value:[];
-  if(pr.status==='fulfilled')providers.push({provider:'PointsBet AU',ok:true,events:pe.length});
+  const points=pr.status==='fulfilled'?pr.value:{events:[]};
+  const pe=points.events;
+  if(pr.status==='fulfilled')providers.push({provider:'PointsBet AU',ok:true,events:pe.length,listed:points.listed,
+    candidates:points.candidates,cards:points.cards,card_failures:points.card_failures,
+    rejected:points.rejected,market_examples:points.market_examples});
   else providers.push({provider:'PointsBet AU',ok:false,events:0,error:String(pr.reason?.message||pr.reason).slice(0,200)});
   const empty={events:[],listed:0,cards:0,cardFailures:0,categoryErrors:[]};
   const neds=nr.status==='fulfilled'?nr.value:empty;
