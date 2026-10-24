@@ -1,0 +1,106 @@
+name: Top Notch Arb SEO Manager
+
+on:
+  schedule:
+    - cron: '37 4 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '*.html'
+      - 'scripts/seo-manager.cjs'
+      - 'tests/seo-manager.test.cjs'
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: top-notch-seo
+  cancel-in-progress: false
+
+jobs:
+  seo-upkeep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch current site
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check page metadata and canonical URLs
+        id: audit
+        continue-on-error: true
+        run: |
+          node scripts/seo-manager.cjs --audit
+          node -e "let r=require('./reports/seo-report.json');if(r.recommendations.length){console.error('SEO metadata needs human-reviewed fixes:',r.recommendations);process.exit(1)}"
+
+      - name: Safely rebuild sitemap and robots only when needed
+        if: steps.audit.outcome == 'success'
+        run: node scripts/seo-manager.cjs --apply
+
+      - name: Verify sitemap is current and all regression tests pass
+        if: steps.audit.outcome == 'success'
+        run: |
+          node scripts/seo-manager.cjs --check
+          node --test tests/*.test.cjs
+
+      - name: Automatically publish validated deterministic SEO changes
+        if: steps.audit.outcome == 'success'
+        run: |
+          git add -- sitemap.xml robots.txt
+          if git diff --cached --quiet; then
+            echo 'Sitemap and robots are already current; no deployment needed.'
+            exit 0
+          fi
+          git config user.name 'top-notch-seo[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore(seo): update verified sitemap and robots'
+          git push origin HEAD:main
+
+      - name: Save SEO audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: top-notch-seo-report
+          path: reports/seo-report.json
+          if-no-files-found: warn
+          retention-days: 21
+
+      - name: Create one review issue for non-automatic SEO problems
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const {owner,repo}=context.repo;
+            const fs=require('fs');
+            if(!fs.existsSync('reports/seo-report.json'))return;
+            const report=JSON.parse(fs.readFileSync('reports/seo-report.json','utf8'));
+            const warnings=report.recommendations||[];
+            const title='[SEO Manager] Review website metadata and canonical URLs';
+            const marker='<!-- top-notch-seo-manager -->';
+            const open=await github.paginate(github.rest.issues.listForRepo,{owner,repo,state:'open',per_page:100});
+            const existing=open.find(i=>!i.pull_request&&i.title===title&&i.body?.includes(marker));
+            if(warnings.length){
+              const body=[marker,'### Human-reviewed SEO repairs needed','Automated SEO changed no on-page text.',
+                ...warnings.slice(0,30).map(w=>'- '+w.page+': '+w.reason+(w.with?' (duplicate of '+w.with+')':'')),
+                '', 'Read SEO_AGENT.md and AGENTS.md before repairing. Submit an audited pull request, do not invent search rankings or gambling claims.'].join('\n');
+              if(!existing)await github.rest.issues.create({owner,repo,title,body});
+            }else if(existing){
+              await github.rest.issues.createComment({owner,repo,issue_number:existing.number,body:'SEO metadata audit now passes. Closing this issue.'});
+              await github.rest.issues.update({owner,repo,issue_number:existing.number,state:'closed'});
+            }
+
+      - name: Mark audit failure for review
+        if: steps.audit.outcome != 'success'
+        run: |
+          echo 'Manual review required: sitemap will not auto-publish while canonicals/meta are invalid.'
+          exit 1
