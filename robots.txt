@@ -1,6 +1,7 @@
 User-agent: *
 Allow: /
-Disallow: /account.html
 Disallow: /api/
+Disallow: /account.html
+Disallow: /login.html
 
 Sitemap: https://arb-scanner-app.vercel.app/sitemap.xml
