@@ -266,3 +266,30 @@ test('bookmaker comparison filtering uses the same input and supports new bookma
  assert.match(html,/data-book="sportsbet"/);
  assert.match(html,/data-book="tab"/);
 });
+
+test('a bookmaker cannot offer impossible home and away prices combined from different feeds',()=>{
+ const t=new Date(Date.now()+24*60*60*1000).toISOString();
+ const e=(book,h,a,source)=>E.eventObj('afl','Geelong Cats','Carlton Blues',t,book,
+  [{role:'home',odds:h},{role:'away',odds:a}],source);
+ const old=e('Neds',2.2,1.7,'krok');
+ const direct=e('Neds',1.7,2.0,'neds');
+ const other=e('Ladbrokes AU',1.9,1.9,'ladbrokes au');
+ const a=E.merge([old,direct,other])[0];
+ assert.equal(a.books.size,2);
+ assert.equal(a.offers.length,4,'only one coherent quote per bookmaker');
+ assert.equal(a.offers.find(o=>o.book==='Neds'&&o.role==='home').odds,1.7);
+ assert.equal(E.arb(a),null,'combined stale home price could create fake arbitrage');
+});
+test('direct bookmaker snapshot prevails even if an aggregator is processed last',()=>{
+ const t=new Date(Date.now()+24*60*60*1000).toISOString();
+ const e=(h,a,src)=>E.eventObj('nhl','Boston Bruins','New York Rangers',t,'Neds',
+  [{role:'home',odds:h},{role:'away',odds:a}],src);
+ const m=E.merge([e(1.85,1.9,'neds'),e(2.25,1.55,'the-odds-api')])[0];
+ assert.equal(m.books.size,1);
+ assert.equal(m.offers.find(x=>x.role==='home').odds,1.85);
+});
+test('PointsBet sport aliases support ice_hockey and aussie_rules feed keys',()=>{
+ const src=fs.readFileSync(path.join(__dirname,'../api/arbitrage.js'),'utf8');
+ assert.match(src,/ice\[ _-\]\?hockey/);
+ assert.match(src,/aussie\[ _-\]\?rules/);
+});
