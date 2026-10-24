@@ -21,4 +21,4 @@ jobs:
         with:
           node-version: '22'
       - name: Test odds, matching, and frontend safety
-        run: node --test tests/arb-engine.test.cjs
+        run: node --test tests/*.test.cjs
