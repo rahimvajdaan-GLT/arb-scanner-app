@@ -17,7 +17,7 @@ const liveEls = {
   metricLastScan: document.getElementById('metricLastScan'),
 };
 
-const DISPLAY_TARGET = 10;
+const DISPLAY_TARGET = 25;
 const FUTURE_BUFFER_MS = 10 * 60 * 1000;
 let refreshTimer = null;
 let latestEvents = [];
@@ -188,9 +188,10 @@ function buildBoard(events) {
     .filter(item => bookmakerMatches(item.plan))
     .filter(item => item.event.is_arb === true && item.plan.profit > 0 && item.plan.roi > 0)
     .sort((a, b) => {
-      const timeDiff = parseStartMs(a.event.commence_time) - parseStartMs(b.event.commence_time);
-      if (timeDiff !== 0) return timeDiff;
-      return b.plan.roi - a.plan.roi;
+      // Higher verified theoretical return first; use kickoff as tie-breaker.
+      const profitDiff = b.plan.roi - a.plan.roi;
+      if (Math.abs(profitDiff) > 1e-9) return profitDiff;
+      return parseStartMs(a.event.commence_time) - parseStartMs(b.event.commence_time);
     });
   return { board: trueArbs.slice(0, DISPLAY_TARGET), trueArbs };
 }
@@ -212,7 +213,7 @@ function renderLive(events, scanTime = latestScanTime || new Date()) {
 
   if (!board.length) {
     liveEls.message.textContent = 'No pre-match positive arbitrage opportunities match your current filters.';
-    liveEls.results.innerHTML = `<div class="no-results"><div class="no-results-icon">◎</div><div><strong>No pre-match positive arbs right now</strong><span>In-play and games starting within 10 minutes are hidden. Try All Sports, All Markets, or clear the bookmaker filter.</span></div></div>`;
+    liveEls.results.innerHTML = `<div class="no-results"><div class="no-results-icon">◎</div><div><strong>No verified positive opportunities in this scan</strong><span>In-play and games starting within 10 minutes are hidden. The checked bookmakers did not offer a profitable combination. Choose another sport or clear your filters; other fixtures may remain unchecked.</span></div></div>`;
     return;
   }
 
@@ -252,7 +253,7 @@ function renderLive(events, scanTime = latestScanTime || new Date()) {
       <div class="live-summary">
         <div><span>Total Stake</span><strong>${money(totalStake)}</strong></div>
         <div><span>Quoted Profit</span><strong class="profit-text">${money(plan.profit)}</strong></div>
-        <div><span>Quoted Return</span><strong>${money(plan.guaranteedReturn)}</strong></div>
+        <div><span>Min. Theoretical Return</span><strong>${money(plan.guaranteedReturn)}</strong></div>
         <div><span>Market</span><strong>${esc(market)}</strong></div>
       </div>
       <div class="bet-help">Place <strong>every bet below</strong> at the listed bookmaker. This is arbitrage coverage, not a prediction of which team will win.</div>
