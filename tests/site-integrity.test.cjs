@@ -37,6 +37,19 @@ test('market selectors are honest about supported markets',()=>{
  assert.match(html,/<option value="spreads" disabled>/);
  assert.match(html,/<option value="totals" disabled>/);
 });
+test('scanner switches retain native keyboard access and a visible focus indicator',()=>{
+ const html=read('scanner.html'),css=read('styles.css');
+ for(const id of ['liveExtraFeed','liveOddsApi','autoRefresh']){
+  assert.match(html,new RegExp('<label class="toggle-row" for="'+id+'"><input id="'+id+'" type="checkbox"><span class="toggle-ui">'));
+ }
+ const rules=[...css.matchAll(/\.toggle-row input\{([^}]+)\}/g)];
+ const effectiveRule=rules.at(-1)?.[1]||'';
+ assert.match(effectiveRule,/display:block/,'checkbox must remain in the accessibility tree');
+ assert.match(effectiveRule,/position:absolute/);
+ assert.match(effectiveRule,/clip-path:inset\(50%\)/,'hide visually without disabling keyboard access');
+ assert.doesNotMatch(effectiveRule,/display:none|visibility:hidden/);
+ assert.match(css,/\.toggle-row input:focus-visible\+\.toggle-ui\{[^}]*outline:3px solid #315fd8;outline-offset:3px/);
+});
 test('no credentials or API keys embedded in the client',()=>{
  for(const p of pages){
   const html=read(p);
