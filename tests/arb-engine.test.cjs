@@ -8,7 +8,7 @@ const path=require('node:path');
 const js=fs.readFileSync(path.join(__dirname,'../api/arbitrage.js'),'utf8')
  .replace('export default async function handler','async function handler');
 const env={console,Date,URL,URLSearchParams,setTimeout,clearTimeout,process:{env:{}}};
-vm.runInNewContext(js+'\nthis.testEngine={eventObj,merge,priceAudit,arb,bookmakerName,same,entainCardSelections,krokEvents,krokSportRow,theOddsConvert};',env,{filename:'api/arbitrage.js'});
+vm.runInNewContext(js+'\nthis.testEngine={eventObj,merge,priceAudit,arb,bookmakerName,same,entainCardSelections,krokEvents,krokSportRow,theOddsConvert,sampleRotating,samplePreferred};',env,{filename:'api/arbitrage.js'});
 const E=env.testEngine;
 const future=new Date(Date.now()+24*60*60*1000).toISOString();
 function fixture(book,home,away,values,sport='basketball'){
@@ -121,7 +121,7 @@ test('frontend invalidates old quotes and refreshes the versioned script',()=>{
  assert.match(front,/MAX_QUOTE_AGE_MS = 2 \* 60 \* 1000/);
  assert.match(front,/latestEvents = \[\];/);
  assert.match(html,/arb:scan-expired/);
- assert.match(html,/live\.js\?v=42/);
+ assert.match(html,/live\.js\?v=43/);
 });
 
 test('nested Entain event cards with decimal numeric odds yield two valid selections',()=>{
@@ -187,7 +187,7 @@ test('extra feed only runs on user opt-in; auto refresh cannot drain free quota'
  assert.match(page,/id="liveExtraFeed"/);
  assert.match(front,/include_krok/);
  assert.match(front,/liveEls.extraFeed\.checked\) liveEls.autoRefresh.checked = false/);
- assert.match(page,/live\.js\?v=42/);
+ assert.match(page,/live\.js\?v=43/);
 });
 
 test('exclude exchange prices until commission and liquidity are modeled',()=>{
@@ -232,5 +232,37 @@ test('The Odds API optional source is manual, with no upfront call or public key
  assert.match(front,/include_odds_api/);
  assert.match(front,/liveEls\.oddsApi\.checked/);
  assert.match(page,/id="liveOddsApi"/);
- assert.match(page,/live\.js\?v=42/);
+ assert.match(page,/live\.js\?v=43/);
+});
+
+test('bookmaker fixture sample moves through different events between 15-minute windows',()=>{
+ const items=Array.from({length:20},(_,i)=>({id:String(i)}));
+ const a=E.sampleRotating(items,6,0),b=E.sampleRotating(items,6,15*60*1000);
+ assert.equal(a.length,6);
+ assert.equal(b.length,6);
+ assert.notEqual(a[0].id,b[0].id);
+ assert.equal(new Set(a.map(x=>x.id)).size,6);
+});
+test('matched competitor fixtures get priority before rotating other event cards',()=>{
+ const t=new Date(Date.now()+24*60*60*1000).toISOString();
+ const rows=Array.from({length:12},(_,i)=>({id:String(i),sport:'nhl',home:'Alpha '+i,away:'Beta '+i,time:t}));
+ const priorities=E.samplePreferred(rows,6,[{sport:'nhl',home:'Alpha 8',away:'Beta 8',time:t}],0);
+ assert.equal(priorities.length,6);
+ assert.equal(priorities[0].id,'8');
+});
+test('sampling and API cache do not display impossible five-minute live quotes',()=>{
+ const backend=fs.readFileSync(path.join(__dirname,'../api/arbitrage.js'),'utf8');
+ const front=fs.readFileSync(path.join(__dirname,'../live.js'),'utf8');
+ assert.match(backend,/s-maxage=90/);
+ assert.match(front,/MAX_QUOTE_AGE_MS = 2 \* 60 \* 1000/);
+ assert.match(backend,/limit:'10'/);
+ assert.match(backend,/ENTAIN_CARDS_FILTERED=6/);
+});
+test('bookmaker comparison filtering uses the same input and supports new bookmaker chips',()=>{
+ const front=fs.readFileSync(path.join(__dirname,'../live.js'),'utf8');
+ const html=fs.readFileSync(path.join(__dirname,'../scanner.html'),'utf8');
+ assert.match(front,/arb:book-filter/);
+ assert.match(html,/addEventListener\('arb:book-filter'/);
+ assert.match(html,/data-book="sportsbet"/);
+ assert.match(html,/data-book="tab"/);
 });
