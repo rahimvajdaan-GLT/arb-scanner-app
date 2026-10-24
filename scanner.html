@@ -38,7 +38,7 @@
 </section>
 <div id="liveResults" class="live-results"></div>
 <details id="feedDetails" class="scan-feed-details"><summary>Feed health &amp; scan details</summary><div id="feedDiagnostics" class="scan-feed-lines">Scan first to check provider health.</div></details>
-</section><footer>Top Notch Arb · Australian arbitrage scanner</footer></main></div></div><script src="/live.js?v=45"></script><script>
+</section><footer>Top Notch Arb · Australian arbitrage scanner</footer></main></div></div><script src="/live.js?v=46"></script><script>
 // Positive opportunities are rendered by live.js, with profit and stake checks.
 // This panel reports factual coverage and feed health without advertising losses.
 (()=>{
@@ -57,8 +57,8 @@
     const active=sources.filter(p=>countNum(p.events)>0);
     if(count)count.textContent=markets+' verified market'+(markets===1?'':'s')+' checked';
     if(summary){
-      if(positive>0) summary.textContent='Found '+positive+' positive theoretical opportunit'+(positive===1?'y':'ies')+' among '+markets+' compatible markets from '+books+' bookmakers. Only stake-positive results are displayed below. Verify odds at each bookmaker before any bet.';
-      else if(markets>0) summary.textContent='No positive arbitrage found in '+markets+' comparable markets from '+books+' bookmakers. Other events may remain unchecked due to provider sampling and quotas.';
+      if(positive>0) summary.textContent='Found '+positive+' positive theoretical opportunit'+(positive===1?'y':'ies')+' among '+markets+' compatible '+(markets===1?'market':'markets')+' from '+books+' bookmakers. Only stake-positive results are displayed below. Verify odds at each bookmaker before any bet.';
+      else if(markets>0) summary.textContent='No positive arbitrage found in '+markets+' comparable '+(markets===1?'market':'markets')+' from '+books+' bookmakers. Other events may remain unchecked due to provider sampling and quotas.';
       else if(active.length) summary.textContent='Received bookmaker odds, but no compatible same-fixture prices from two independent bookmakers could be confirmed. This is not a zero-profit claim for the whole market.';
       else summary.textContent='Bookmaker odds are unavailable or rate-limited. No reliable arbitrage calculation can be made right now.';
     }
