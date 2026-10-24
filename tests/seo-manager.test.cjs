@@ -14,6 +14,14 @@ test('market guide describes current scanner coverage without advertising unavai
  assert.match(section,/full-time soccer.*home, draw and away outcomes/);
  assert.doesNotMatch(section,/as well as supported spread and totals opportunities/);
 });
+test('homepage market coverage matches the connected match-winner scanner',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
+ const marketStat=html.match(/<div class="hero-stat"><span>Markets<\/span><strong>(.*?)<\/strong><\/div>/)?.[1];
+ assert.equal(marketStat,'Match winner','homepage must not advertise multiple connected market types');
+ const scanner=fs.readFileSync(path.join(__dirname,'..','scanner.html'),'utf8');
+ assert.match(scanner,/<option value="spreads" disabled>/);
+ assert.match(scanner,/<option value="totals" disabled>/);
+});
 function testSite(fn){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'arb-seo-'));
  function page(name,title,desc=true,canonical=true,robots=''){
