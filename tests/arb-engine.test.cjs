@@ -121,7 +121,7 @@ test('frontend invalidates old quotes and refreshes the versioned script',()=>{
  assert.match(front,/MAX_QUOTE_AGE_MS = 2 \* 60 \* 1000/);
  assert.match(front,/latestEvents = \[\];/);
  assert.match(html,/arb:scan-expired/);
- assert.match(html,/live\.js\?v=44/);
+ assert.match(html,/live\.js\?v=45/);
 });
 
 test('nested Entain event cards with decimal numeric odds yield two valid selections',()=>{
@@ -187,7 +187,7 @@ test('extra feed only runs on user opt-in; auto refresh cannot drain free quota'
  assert.match(page,/id="liveExtraFeed"/);
  assert.match(front,/include_krok/);
  assert.match(front,/liveEls.extraFeed\.checked\) liveEls.autoRefresh.checked = false/);
- assert.match(page,/live\.js\?v=44/);
+ assert.match(page,/live\.js\?v=45/);
 });
 
 test('exclude exchange prices until commission and liquidity are modeled',()=>{
@@ -232,7 +232,7 @@ test('The Odds API optional source is manual, with no upfront call or public key
  assert.match(front,/include_odds_api/);
  assert.match(front,/liveEls\.oddsApi\.checked/);
  assert.match(page,/id="liveOddsApi"/);
- assert.match(page,/live\.js\?v=44/);
+ assert.match(page,/live\.js\?v=45/);
 });
 
 test('bookmaker fixture sample moves through different events between 15-minute windows',()=>{
@@ -258,13 +258,24 @@ test('sampling and API cache do not display impossible five-minute live quotes',
  assert.match(backend,/limit:'10'/);
  assert.match(backend,/ENTAIN_CARDS_FILTERED=6/);
 });
-test('bookmaker comparison filtering uses the same input and supports new bookmaker chips',()=>{
+test('bookmaker filters are applied to positive opportunity cards',()=>{
  const front=fs.readFileSync(path.join(__dirname,'../live.js'),'utf8');
  const html=fs.readFileSync(path.join(__dirname,'../scanner.html'),'utf8');
- assert.match(front,/arb:book-filter/);
- assert.match(html,/addEventListener\('arb:book-filter'/);
+ assert.match(front,/bookmakerMatches\(item\.plan\)/);
  assert.match(html,/data-book="sportsbet"/);
  assert.match(html,/data-book="tab"/);
+});
+test('user page displays positive-only results and no loss/negative ROI comparison cards',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../scanner.html'),'utf8');
+ const front=fs.readFileSync(path.join(__dirname,'../live.js'),'utf8');
+ assert.match(html,/Verified Positive Arbitrage/);
+ assert.match(html,/id="scanCoverageText"/);
+ assert.match(html,/id="feedDetails"/);
+ assert.match(html,/aria-label="Positive opportunities and scan coverage"/);
+ assert.doesNotMatch(html,/Closest:/);
+ assert.doesNotMatch(html,/comparison-roi '+/);
+ assert.doesNotMatch(html,/Negative returns are/);
+ assert.match(front,/item\.event\.is_arb === true && item\.plan\.profit > 0 && item\.plan\.roi > 0/);
 });
 
 test('a bookmaker cannot offer impossible home and away prices combined from different feeds',()=>{
