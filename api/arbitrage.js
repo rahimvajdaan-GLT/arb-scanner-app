@@ -766,7 +766,7 @@ export default async function handler(req,res){
   }
   try{
     const data=await item.promise;
-    res.setHeader('Cache-Control','public, max-age=0, s-maxage=300');
+    res.setHeader('Cache-Control','public, max-age=0, s-maxage=90');
     return res.status(200).json(debug?data:data.results);
   }catch(e){
     scanCache.delete(key);
