@@ -1,0 +1,123 @@
+name: Top Notch Arb AI Developer
+
+on:
+  workflow_run:
+    workflows: ['Top Notch Arb Maintenance Agent']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+  actions: read
+
+concurrency:
+  group: arb-developer-fix
+  cancel-in-progress: false
+
+jobs:
+  develop:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out trusted main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check whether AI coding is explicitly enabled
+        id: configured
+        env:
+          OPENAI_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -n "$OPENAI_KEY" ]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            echo 'AI coding skipped: GitHub secret OPENAI_API_KEY is not configured. Scheduled monitoring still works at no AI API cost.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Skip when an agent repair PR is already open
+        if: steps.configured.outputs.ready == 'true'
+        id: pending
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner,repo}=context.repo;
+            const pulls=await github.rest.pulls.list({owner,repo,state:'open',per_page:100});
+            const exists=pulls.data.some(pr=>pr.head.ref==='bot/top-notch-arb-repair');
+            core.setOutput('skip',exists?'true':'false');
+            if(exists)core.info('Existing agent PR requires review before another is created.');
+
+      - name: Download failed maintenance health report, if available
+        if: steps.configured.outputs.ready == 'true' && steps.pending.outputs.skip != 'true' && github.event_name == 'workflow_run'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: top-notch-arb-health
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: reports/previous
+
+      - name: Have Codex diagnose and implement a small verified repair
+        id: codex
+        if: steps.configured.outputs.ready == 'true' && steps.pending.outputs.skip != 'true'
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ':workspace'
+          prompt: |
+            You are the responsible senior developer for Top Notch Arb.
+            Follow AGENTS.md exactly. The scheduled maintenance workflow failed
+            or the owner explicitly requested an AI developer run.
+            First reproduce the existing defect with node --test tests/*.test.cjs.
+            If reports/previous/site-health.json exists, read its diagnostics.
+            Do not assume 0 profitable arbs is a software bug.
+            Diagnose first and make the smallest safe changes with regression tests.
+            NEVER invent positive betting opportunities, disable safety checks,
+            fake live odds, weaken existing tests, expose secrets or use /api/arbitrage
+            in CI (that endpoint consumes bookmaker quota).
+            If the problem is a temporary bookmaker HTTP 429, insufficient API
+            coverage, Vercel permissions or an external provider outage, DO NOT
+            change code unless a reproducible implementation defect is present.
+            Any changed code must pass node --test tests/*.test.cjs.
+            Keep documentation of test results and limitations in your final reply.
+            DO NOT commit or push; the PR creation step handles safe branch updates.
+
+      - name: Run full regression suite after repair
+        if: steps.codex.outcome == 'success'
+        run: node --test tests/*.test.cjs
+
+      - name: Open reviewable repair pull request (never auto-merge)
+        if: steps.codex.outcome == 'success'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ github.token }}
+          branch: bot/top-notch-arb-repair
+          base: main
+          delete-branch: true
+          commit-message: 'fix: AI-maintainer proposed scanner repair'
+          title: 'AI Developer: reviewed repair for Top Notch Arb'
+          body: |
+            Automated draft of a small bug fix after maintainer checks.
+            Please REVIEW changes, CI tests, odds-source assumptions and Vercel preview.
+            It is NOT automatically merged to production.
+            See AGENTS.md for integrity and quota rules.
+          add-paths: |
+            api/
+            scripts/
+            tests/
+            *.js
+            *.html
+            *.css
+            *.md
+            .github/workflows/
