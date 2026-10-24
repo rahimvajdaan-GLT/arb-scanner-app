@@ -5,6 +5,15 @@ const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const SEO=require('../scripts/seo-manager.cjs');
 
 const SITE=SEO.ORIGIN;
+test('market guide describes current scanner coverage without advertising unavailable markets',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'..','how-it-works.html'),'utf8');
+ const section=html.match(/<h2>Moneyline, spreads and totals<\/h2><p>(.*?)<\/p>/)?.[1];
+ assert.ok(section,'guide retains its market coverage explanation');
+ assert.match(section,/pre-match match-winner or moneyline markets only/);
+ assert.match(section,/Spreads, handicaps and totals are not yet connected/);
+ assert.match(section,/full-time soccer.*home, draw and away outcomes/);
+ assert.doesNotMatch(section,/as well as supported spread and totals opportunities/);
+});
 function testSite(fn){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'arb-seo-'));
  function page(name,title,desc=true,canonical=true,robots=''){
