@@ -8,7 +8,7 @@ const path=require('node:path');
 const js=fs.readFileSync(path.join(__dirname,'../api/arbitrage.js'),'utf8')
  .replace('export default async function handler','async function handler');
 const env={console,Date,URL,URLSearchParams,setTimeout,clearTimeout,process:{env:{}}};
-vm.runInNewContext(js+'\nthis.testEngine={eventObj,merge,priceAudit,arb,bookmakerName,same,entainCardSelections,krokEvents,krokSportRow,theOddsConvert,sampleRotating,samplePreferred,sourceRank,sportOf};',env,{filename:'api/arbitrage.js'});
+vm.runInNewContext(js+'\nthis.testEngine={eventObj,merge,priceAudit,arb,bookmakerName,same,entainCardSelections,krokEvents,krokSportRow,theOddsConvert,sampleRotating,samplePreferred,sourceRank,sportOf,pointsBetFullMatchWinner};',env,{filename:'api/arbitrage.js'});
 const E=env.testEngine;
 const future=new Date(Date.now()+24*60*60*1000).toISOString();
 function fixture(book,home,away,values,sport='basketball'){
@@ -300,4 +300,26 @@ test('PointsBet diagnostic supplies counts instead of silently hiding zero-odds 
  assert.match(backend,/candidates:eligible.length/);
  assert.match(backend,/rejected:points.rejected/);
  assert.match(front,/p.market_examples/);
+});
+
+test('PointsBet tennis accepts full Match Winner with exact fixture suffix',()=>{
+ const pair={home:'Sopko, Martin',away:'Saleny, Petr'};
+ assert.equal(E.pointsBetFullMatchWinner({name:'Match Winner (Sopko, Martin v Saleny, Petr)'},pair),true);
+ assert.equal(E.pointsBetFullMatchWinner({name:'Match Winner (Saleny, Petr v Sopko, Martin)'},pair),true);
+ assert.equal(E.pointsBetFullMatchWinner({name:'Match Winner'},pair),true);
+});
+test('PointsBet tennis rejects unrelated, handicapped, first-set and first-game markets',()=>{
+ const pair={home:'Sopko, Martin',away:'Saleny, Petr'};
+ for(const name of [
+  '1st Game Winner (Sopko, Martin v Saleny, Petr)',
+  'Match Point Handicap (Sopko, Martin v Saleny, Petr)',
+  '1st Set Match Winner (Sopko, Martin v Saleny, Petr)',
+  'Match Winner (Player A v Player B)',
+  'Match Winner (First Set)',
+  'Match Winner (Sopko, Martin v Saleny, Petr) - First Set'
+ ])assert.equal(E.pointsBetFullMatchWinner({name},pair),false,name);
+});
+test('PointsBet rejects suspended match-winner markets',()=>{
+ const pair={home:'Sopko, Martin',away:'Saleny, Petr'};
+ assert.equal(E.pointsBetFullMatchWinner({name:'Match Winner',isOpenForBetting:false},pair),false);
 });
