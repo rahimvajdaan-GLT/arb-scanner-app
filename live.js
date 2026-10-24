@@ -295,7 +295,7 @@ async function loadSportsCatalog() {
     if (!response.ok || !Array.isArray(sports)) return;
     const current = liveEls.sport.value;
     const active = sports.filter(s => s && s.key && s.title).sort((a, b) => String(a.group || '').localeCompare(String(b.group || '')) || String(a.title).localeCompare(String(b.title)));
-    liveEls.sport.innerHTML = '<option value="">All Sports</option>' + active.map(s => `<option value="${esc(s.key)}">${esc(s.title)}${s.group ? ` — ${esc(s.group)}` : ''}</option>`).join('');
+    liveEls.sport.innerHTML = '<option value="">All Sports — sampled rotation</option>' + active.map(s => `<option value="${esc(s.key)}">${esc(s.title)}${s.group ? ` — ${esc(s.group)}` : ''}</option>`).join('');
     if ([...liveEls.sport.options].some(o => o.value === current)) liveEls.sport.value = current;
   } catch (_) {}
 }
@@ -388,6 +388,7 @@ function setBookPreset(value) {
   liveEls.books.value = value;
   document.querySelectorAll('[data-book]').forEach(btn => btn.classList.toggle('active', value && btn.dataset.book === value));
   renderCached();
+  window.dispatchEvent(new CustomEvent('arb:book-filter'));
 }
 
 liveEls.scanBtn.addEventListener('click', scanLive);
@@ -411,7 +412,7 @@ if (liveEls.oddsApi) liveEls.oddsApi.addEventListener('change', ()=>{
   liveEls.message.textContent=liveEls.oddsApi.checked?'Choose a supported sport and scan once. The Odds API requires its own server-side free key.':'The Odds API extra feed disabled.';
 });
 liveEls.stake.addEventListener('input', renderCached);
-liveEls.books.addEventListener('input', renderCached);
+liveEls.books.addEventListener('input', ()=>{renderCached();window.dispatchEvent(new CustomEvent('arb:book-filter'))});
 liveEls.sport.addEventListener('change', scanLive);
 liveEls.market.addEventListener('change', scanLive);
 liveEls.stake.addEventListener('keydown', e => { if (e.key === 'Enter') scanLive(); });
