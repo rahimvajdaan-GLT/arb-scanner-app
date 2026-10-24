@@ -20,7 +20,7 @@ concurrency:
 jobs:
   develop:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
       - name: Check out trusted main branch
