@@ -28,8 +28,27 @@ Solve reproducible defects, keep the app stable, and use pull requests for chang
 6. **Accessibility and UX.** Mobile/desktop must display meaningful loading, no-results,
    errors and successful results. Make bookmaker filters, sport filters, prices, stake
    amounts and buttons functional, not cosmetic.
-7. **No silent production deployment.** Submit code changes as a PR. Require the repo's
-   tests to pass and human approval before merging to `main`. Vercel deploys `main`.
+7. **No unreviewed AI production deployments.** Submit AI-edited code/content as
+   a PR with tests and human approval before merging to `main`. The one narrow
+   exception is the deterministic sitemap/robots regeneration described below.
+
+## Two cooperating site managers
+
+- **AI Maintenance Manager:** `.github/workflows/arb-maintenance.yml` performs
+  no-credit health and regression checks every six hours, records incidents in
+  GitHub Issues, and invokes the opt-in Codex repair workflow on failed checks
+  when `secrets.OPENAI_API_KEY` is provided. AI repairs are pull requests
+  requiring code review and passing tests.
+- **AI SEO Manager:** `SEO_AGENT.md` defines truthful technical SEO and editing
+  rules. `.github/workflows/arb-seo-manager.yml` audits indexable metadata
+  every day and when HTML pages change. It **may safely auto-publish only**
+  deterministic `sitemap.xml` / `robots.txt` corrections after tests pass.
+  `.github/workflows/arb-ai-seo.yml` can suggest on-page improvements by
+  pull request, only when the optional paid API secret is configured.
+- Vercel deploys reviewed code merged to `main`. Never auto-merge agent-written
+  odds, pricing, gambling, or editorial code. No agent bypasses market
+  validation, rate limits or server secrets.
+- Every repository change must pass `node --test tests/*.test.cjs`.
 
 ## Source ownership
 
