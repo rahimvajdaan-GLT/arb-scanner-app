@@ -112,6 +112,9 @@
     if(p.card_failures!==undefined)message+=' | card failures '+p.card_failures;
     if(p.rejected)message+=' | rejected '+Object.entries(p.rejected).map(([reason,count])=>reason+' '+count).join(', ');
     if(p.market_examples?.length)lines.push('  '+p.provider+' available market labels: '+p.market_examples.flat().join(', '));
+    if(p.rejected_price_examples?.length)for(const sample of p.rejected_price_examples){
+      lines.push('  '+p.provider+' valid market but rejected price selections: '+sample.market+' | '+sample.fixture+' | outcomes '+sample.outcome_count+' | names '+(sample.outcome_names||[]).join(', ')+' | price fields '+(sample.price_fields||[]).map(x=>x.join('/')).join('; '));
+    }
     if(p.parser_stats)message+=' | parsed '+(p.parser_stats.accepted||0)+' | rejected markets '+(p.parser_stats.no_accepted_match_market||0)+' | invalid fixture '+(p.parser_stats.invalid_fixture_after_parsing||0);
     if(p.rejected_card_samples?.length){
       for(const card of p.rejected_card_samples){
