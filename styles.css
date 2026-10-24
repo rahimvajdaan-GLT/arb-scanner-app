@@ -21,6 +21,10 @@ input::placeholder{color:#5f6c87}
 button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid rgba(154,168,255,.75);outline-offset:2px}
 .status-pill{transition:.2s}
 .live-results:empty{display:none}
+/* Keep custom switches available to keyboard and assistive technology. */
+.toggle-row{position:relative}
+.toggle-row input{display:block;position:absolute;width:1px;height:1px;min-height:0;padding:0;border:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.toggle-row input:focus-visible+.toggle-ui{outline:3px solid #315fd8;outline-offset:3px}
 .error-panel{border-color:rgba(255,113,131,.2);background:rgba(255,113,131,.045)}
 
 @media(max-width:1100px){.metric-strip{grid-template-columns:repeat(2,1fr)}.live-controls{grid-template-columns:repeat(2,1fr)}.live-summary{grid-template-columns:repeat(2,1fr)}}
