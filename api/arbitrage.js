@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v42-broader-sampling';
+const ENGINE='au-openbooks-v43-quote-integrity';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=30*60*1000;
 // Each scan is a bounded SAMPLE, not an exhaustive market-wide search.
@@ -71,7 +71,7 @@ function same(a,b){
 function teams(name){const s=String(name||'').trim();const m=s.match(/^(.+?)\s+(?:vs\.?|v|@|at)\s+(.+)$/i);if(!m)return null;const isAway=/\s(?:@|at)\s/i.test(s);return isAway?{home:m[2].trim(),away:m[1].trim()}:{home:m[1].trim(),away:m[2].trim()}}
 function dec(v){const n=Number(v);return Number.isFinite(n)&&n>1?n:null}
 function role(name,h,a,homeAway){if(homeAway==='HOME')return'home';if(homeAway==='AWAY')return'away';if(same(name,h))return'home';if(same(name,a))return'away';if(/^(draw|tie)$/i.test(String(name||'')))return'draw';return null}
-function sportOf(s){s=String(s||'').toLowerCase();if(/afl|australian/.test(s))return'afl';if(/cricket|big bash|ipl/.test(s))return'cricket';if(/basketball|nba|nbl/.test(s))return'basketball';if(/ice hockey|nhl/.test(s))return'nhl';if(/soccer|premier league|epl/.test(s))return'soccer';if(/baseball|mlb/.test(s))return'baseball';if(/nrl|rugby league/.test(s))return'nrl';if(/american football|nfl/.test(s))return'nfl';if(/tennis|atp|wta/.test(s))return'tennis';return'other'}
+function sportOf(s){s=String(s||'').toLowerCase();if(/afl|aussie[ _-]?rules|australian/.test(s))return'afl';if(/cricket|big bash|ipl/.test(s))return'cricket';if(/basketball|nba|nbl/.test(s))return'basketball';if(/ice[ _-]?hockey|nhl/.test(s))return'nhl';if(/soccer|premier league|epl/.test(s))return'soccer';if(/baseball|mlb/.test(s))return'baseball';if(/nrl|rugby league/.test(s))return'nrl';if(/american football|nfl/.test(s))return'nfl';if(/tennis|atp|wta/.test(s))return'tennis';return'other'}
 function bookmakerName(value){
  const raw=String(value||'').trim(),key=raw.toLowerCase().replace(/[^a-z0-9]/g,'');
  if(!key)return '';
@@ -89,7 +89,7 @@ function bookmakerName(value){
  };
  return known[key]||raw;
 }
-function eventObj(sport,h,a,time,book,sels,source){
+function eventObj(sport,h,a,time,book,sels,source,quotedAt){
   const iso=firstTime(time),tm=parseMs(iso);if(!h||!a||!Number.isFinite(tm)||tm<=Date.now()+FUTURE_BUFFER_MS)return null;
   book=bookmakerName(book);if(!book)return null;
   const best=new Map();
@@ -98,7 +98,7 @@ function eventObj(sport,h,a,time,book,sels,source){
   // A full-time soccer result requires home / draw / away. A two-price card
   // may be draw-no-bet or qualification and cannot be equated with 1X2.
   if(sport==='soccer'&&(!best.has('home')||!best.has('draw')||!best.has('away')))return null;
-  return{sport,home:h,away:a,time:iso,book,offers:[...best.values()],outcomeCount:best.size,source};
+  return{sport,home:h,away:a,time:iso,book,offers:[...best.values()],outcomeCount:best.size,source,quotedAt:quotedAt||new Date().toISOString()};
 }
 
 function sampleRotating(rows,size,now=Date.now(),period=SAMPLE_ROTATION_MS){
@@ -370,13 +370,37 @@ async function entainBook(host,book,anchors,sport){
   return{events,listed:listed.length,cards:cards.length,cardFailures,parser_stats,rejected_card_samples,categoryErrors,categories:selected.map(x=>x.key),schema_sample,sample_budget:budget,sample_window:'rotates every 15 min'};
 }
 
+function sourceRank(source){
+  if(/^(pointsbet|neds|ladbrokes)/i.test(String(source||'')))return 3;
+  if(['the-odds-api','sockodds','krok'].includes(source))return 2;
+  return 1;
+}
 function merge(events){
   const buckets=[];
   for(const e of events){
-    const t=parseMs(e.time);let b=buckets.find(x=>x.sport===e.sport&&Math.abs(parseMs(x.time)-t)<=MATCH_WINDOW_MS&&((same(x.home,e.home)&&same(x.away,e.away))||(same(x.home,e.away)&&same(x.away,e.home))));
-    if(!b){b={sport:e.sport,home:e.home,away:e.away,time:e.time,offers:[],books:new Set(),outcomeCounts:new Map()};buckets.push(b)}
-    b.books.add(e.book);b.outcomeCounts.set(e.book,e.outcomeCount);const rev=same(e.home,b.away)&&same(e.away,b.home);
-    for(const o of e.offers){let r=o.role;if(rev&&(r==='home'||r==='away'))r=r==='home'?'away':'home';b.offers.push({...o,role:r})
+    if(!e||!e.book||!Array.isArray(e.offers)||e.offers.length<2)continue;
+    const t=parseMs(e.time);
+    let b=buckets.find(x=>x.sport===e.sport&&Math.abs(parseMs(x.time)-t)<=MATCH_WINDOW_MS&&
+      ((same(x.home,e.home)&&same(x.away,e.away))||(same(x.home,e.away)&&same(x.away,e.home))));
+    if(!b){
+      b={sport:e.sport,home:e.home,away:e.away,time:e.time,offers:[],books:new Set(),outcomeCounts:new Map(),snapshots:new Map()};
+      buckets.push(b);
+    }
+    const old=b.snapshots.get(e.book);
+    // One bookmaker, one complete price snapshot. Never combine prices from
+    // different timestamps or API providers for the same bookmaker.
+    const prefer=!old||sourceRank(e.source)>sourceRank(old.source)||
+      (sourceRank(e.source)===sourceRank(old.source)&&parseMs(e.quotedAt)>parseMs(old.quotedAt));
+    if(prefer)b.snapshots.set(e.book,e);
+  }
+  for(const b of buckets){
+    for(const [book,event] of b.snapshots){
+      b.books.add(book);b.outcomeCounts.set(book,event.outcomeCount);
+      const rev=same(event.home,b.away)&&same(event.away,b.home);
+      for(const offer of event.offers){
+        const role=rev&&offer.role==='home'?'away':rev&&offer.role==='away'?'home':offer.role;
+        b.offers.push({...offer,role,book});
+      }
     }
   }
   return buckets;
@@ -490,7 +514,7 @@ async function sockOdds(){
               selections.push({role:side,odds,name:o.name});
             }
           }
-          const item=eventObj(sp,pair.home,pair.away,ev.scheduled_start,book,selections,'sockodds');
+          const item=eventObj(sp,pair.home,pair.away,ev.scheduled_start,book,selections,'sockodds',ev.updated_at||ev.last_update);
           if(item){events.push(item);observed.add(book)}
         }
       }
@@ -573,7 +597,7 @@ function krokEvents(data,sport){
         if(!odds)continue;
         sels.push({name:quote.name,odds});
       }
-      const result=eventObj(sport,pair.home,pair.away,ev.start_time||ev.commence_time||ev.starts_at,book,sels,'krok');
+      const result=eventObj(sport,pair.home,pair.away,ev.start_time||ev.commence_time||ev.starts_at,book,sels,'krok',ev.captured_at||ev.updated_at||ev.observed_at);
       if(result){events.push(result);books.add(result.book)}
       break;
     }
@@ -637,7 +661,7 @@ function theOddsConvert(data,sport){
       const selections=market.outcomes.filter(o=>o&&o.name&&o.point==null&&Number.isFinite(Number(o.price))&&Number(o.price)>1)
         .map(o=>({name:o.name,odds:Number(o.price)}));
       const bookmaker=bookmakerName(book.title||book.key);
-      const item=eventObj(sport,match.home_team,match.away_team,match.commence_time,bookmaker,selections,'the-odds-api');
+      const item=eventObj(sport,match.home_team,match.away_team,match.commence_time,bookmaker,selections,'the-odds-api',market.last_update||book.last_update);
       if(item){events.push(item);books.add(item.book)}
       else invalid++;
     }
