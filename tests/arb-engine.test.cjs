@@ -121,7 +121,7 @@ test('frontend invalidates old quotes and refreshes the versioned script',()=>{
  assert.match(front,/MAX_QUOTE_AGE_MS = 2 \* 60 \* 1000/);
  assert.match(front,/latestEvents = \[\];/);
  assert.match(html,/arb:scan-expired/);
- assert.match(html,/live\.js\?v=45/);
+ assert.match(html,/live\.js\?v=46/);
 });
 
 test('nested Entain event cards with decimal numeric odds yield two valid selections',()=>{
@@ -187,7 +187,7 @@ test('extra feed only runs on user opt-in; auto refresh cannot drain free quota'
  assert.match(page,/id="liveExtraFeed"/);
  assert.match(front,/include_krok/);
  assert.match(front,/liveEls.extraFeed\.checked\) liveEls.autoRefresh.checked = false/);
- assert.match(page,/live\.js\?v=45/);
+ assert.match(page,/live\.js\?v=46/);
 });
 
 test('exclude exchange prices until commission and liquidity are modeled',()=>{
@@ -232,7 +232,7 @@ test('The Odds API optional source is manual, with no upfront call or public key
  assert.match(front,/include_odds_api/);
  assert.match(front,/liveEls\.oddsApi\.checked/);
  assert.match(page,/id="liveOddsApi"/);
- assert.match(page,/live\.js\?v=45/);
+ assert.match(page,/live\.js\?v=46/);
 });
 
 test('bookmaker fixture sample moves through different events between 15-minute windows',()=>{
@@ -333,4 +333,19 @@ test('PointsBet tennis rejects unrelated, handicapped, first-set and first-game 
 test('PointsBet rejects suspended match-winner markets',()=>{
  const pair={home:'Sopko, Martin',away:'Saleny, Petr'};
  assert.equal(E.pointsBetFullMatchWinner({name:'Match Winner',isOpenForBetting:false},pair),false);
+});
+
+test('profitable scan sorts ROI descending and can show all 25 backend matches',()=>{
+ const front=fs.readFileSync(path.join(__dirname,'../live.js'),'utf8');
+ assert.match(front,/DISPLAY_TARGET = 25/);
+ assert.match(front,/const profitDiff = b\.plan\.roi - a\.plan\.roi/);
+ assert.match(front,/plan\.profit > 0 && item\.plan\.roi > 0/);
+});
+test('no loss figures or one-bookmaker cards are shown in the user-facing scan board',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../scanner.html'),'utf8');
+ assert.doesNotMatch(html,/Closest:/);
+ assert.doesNotMatch(html,/id="comparisonRows"/);
+ assert.match(html,/id="scanCoverageText"/);
+ assert.match(html,/id="feedDetails"/);
+ assert.match(html,/live\.js\?v=46/);
 });
