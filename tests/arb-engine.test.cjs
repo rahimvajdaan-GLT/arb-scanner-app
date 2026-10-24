@@ -8,7 +8,7 @@ const path=require('node:path');
 const js=fs.readFileSync(path.join(__dirname,'../api/arbitrage.js'),'utf8')
  .replace('export default async function handler','async function handler');
 const env={console,Date,URL,URLSearchParams,setTimeout,clearTimeout,process:{env:{}}};
-vm.runInNewContext(js+'\nthis.testEngine={eventObj,merge,priceAudit,arb,bookmakerName,same,entainCardSelections,krokEvents,krokSportRow,theOddsConvert,sampleRotating,samplePreferred};',env,{filename:'api/arbitrage.js'});
+vm.runInNewContext(js+'\nthis.testEngine={eventObj,merge,priceAudit,arb,bookmakerName,same,entainCardSelections,krokEvents,krokSportRow,theOddsConvert,sampleRotating,samplePreferred,sourceRank,sportOf};',env,{filename:'api/arbitrage.js'});
 const E=env.testEngine;
 const future=new Date(Date.now()+24*60*60*1000).toISOString();
 function fixture(book,home,away,values,sport='basketball'){
@@ -121,7 +121,7 @@ test('frontend invalidates old quotes and refreshes the versioned script',()=>{
  assert.match(front,/MAX_QUOTE_AGE_MS = 2 \* 60 \* 1000/);
  assert.match(front,/latestEvents = \[\];/);
  assert.match(html,/arb:scan-expired/);
- assert.match(html,/live\.js\?v=43/);
+ assert.match(html,/live\.js\?v=44/);
 });
 
 test('nested Entain event cards with decimal numeric odds yield two valid selections',()=>{
@@ -187,7 +187,7 @@ test('extra feed only runs on user opt-in; auto refresh cannot drain free quota'
  assert.match(page,/id="liveExtraFeed"/);
  assert.match(front,/include_krok/);
  assert.match(front,/liveEls.extraFeed\.checked\) liveEls.autoRefresh.checked = false/);
- assert.match(page,/live\.js\?v=43/);
+ assert.match(page,/live\.js\?v=44/);
 });
 
 test('exclude exchange prices until commission and liquidity are modeled',()=>{
@@ -232,7 +232,7 @@ test('The Odds API optional source is manual, with no upfront call or public key
  assert.match(front,/include_odds_api/);
  assert.match(front,/liveEls\.oddsApi\.checked/);
  assert.match(page,/id="liveOddsApi"/);
- assert.match(page,/live\.js\?v=43/);
+ assert.match(page,/live\.js\?v=44/);
 });
 
 test('bookmaker fixture sample moves through different events between 15-minute windows',()=>{
@@ -290,6 +290,14 @@ test('direct bookmaker snapshot prevails even if an aggregator is processed last
 });
 test('PointsBet sport aliases support ice_hockey and aussie_rules feed keys',()=>{
  const src=fs.readFileSync(path.join(__dirname,'../api/arbitrage.js'),'utf8');
- assert.match(src,/ice\[ _-\]\?hockey/);
- assert.match(src,/aussie\[ _-\]\?rules/);
+ assert.equal(E.sportOf('ice_hockey'),'nhl');
+ assert.equal(E.sportOf('aussie_rules'),'afl');
+});
+
+test('PointsBet diagnostic supplies counts instead of silently hiding zero-odds feed',()=>{
+ const backend=fs.readFileSync(path.join(__dirname,'../api/arbitrage.js'),'utf8');
+ const front=fs.readFileSync(path.join(__dirname,'../scanner.html'),'utf8');
+ assert.match(backend,/candidates:eligible.length/);
+ assert.match(backend,/rejected:points.rejected/);
+ assert.match(front,/p.market_examples/);
 });
