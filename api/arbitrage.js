@@ -674,14 +674,24 @@ async function theOddsApi(sport,enabled){
 }
 async function scan(sport,includeKrok=false,includeOdds=false){
   const providers=[];
-  // Independent feeds run together; an unavailable bookmaker does not block others.
+  // Opportunistic bookmaker matching: price feeds already resolved while
+  // event lists are fetched give Entain a chance to prioritize SAME fixtures.
+  // No source waits for another just to increase overlap.
+  const anchors=[];
+  const observe=p=>p.then(data=>{
+    const events=Array.isArray(data)?data:Array.isArray(data?.events)?data.events:[];
+    anchors.push(...events);
+    return data;
+  });
+  const pbTask=observe(pointsBet(sport)),sockTask=observe(sockOdds());
+  const krokTask=observe(krokOdds(sport,includeKrok)),oddsTask=observe(theOddsApi(sport,includeOdds));
   const [pr,nr,lr,sr,kr,or]=await Promise.allSettled([
-    pointsBet(sport),
-    entainBook('api.neds.com.au','Neds',[],sport),
-    entainBook('api.ladbrokes.com.au','Ladbrokes AU',[],sport),
-    sockOdds(),
-    krokOdds(sport,includeKrok),
-    theOddsApi(sport,includeOdds)
+    pbTask,
+    entainBook('api.neds.com.au','Neds',anchors,sport),
+    entainBook('api.ladbrokes.com.au','Ladbrokes AU',anchors,sport),
+    sockTask,
+    krokTask,
+    oddsTask
   ]);
   const pe=pr.status==='fulfilled'?pr.value:[];
   if(pr.status==='fulfilled')providers.push({provider:'PointsBet AU',ok:true,events:pe.length});
