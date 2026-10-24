@@ -1,0 +1,105 @@
+name: Top Notch Arb AI Product Development Manager
+
+on:
+  schedule:
+    - cron: '41 6 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: top-notch-product-development
+  cancel-in-progress: false
+
+jobs:
+  develop-product:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Check out trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check AI key configuration
+        id: setup
+        env:
+          KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            echo 'OPENAI_API_KEY is not configured; skipping paid AI development.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Prevent overlapping product proposals
+        id: pending
+        if: steps.setup.outputs.ready == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner,repo}=context.repo;
+            const prs=await github.rest.pulls.list({owner,repo,state:'open',per_page:100});
+            const already=prs.data.some(p=>p.head.ref==='bot/top-notch-product-improvements');
+            core.setOutput('skip',already?'true':'false');
+
+      - name: AI product modernization
+        id: codex
+        if: steps.setup.outputs.ready == 'true' && steps.pending.outputs.skip != 'true'
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ':workspace'
+          prompt: |
+            You are the AI Product Development Manager for Top Notch Arb.
+            Read PRODUCT_DEVELOPMENT_AGENT.md, AGENTS.md, and SEO_AGENT.md.
+            Choose the highest priority genuinely missing improvement from the
+            queue, limited to accessibility, mobile usability, performance,
+            and maintainable frontend presentation. Do one small change only.
+            Never modify odds math, API provider integration, market matching,
+            betting signals, secrets, GitHub Actions, hosting or billing.
+            Never invent odds, events, capabilities, partners, or returns.
+            No calls to live bookmaker APIs or /api/arbitrage.
+            Do not make superficial changes solely to force a pull request.
+            Preserve the positive-only results behavior and honest empty states.
+            Add or update focused deterministic tests when practical.
+            Run node --test tests/*.test.cjs and node --check live.js.
+            If tests fail, repair or revert. No commits or pushes.
+
+      - name: Verify full regression suite
+        if: steps.codex.outcome == 'success'
+        run: |
+          node --check live.js
+          node --test tests/*.test.cjs
+
+      - name: Propose verified product improvement for review
+        if: steps.codex.outcome == 'success'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ github.token }}
+          branch: bot/top-notch-product-improvements
+          base: main
+          delete-branch: true
+          title: 'AI Product Manager: focused website modernization'
+          commit-message: 'feat: AI-proposed usability or performance improvement'
+          body: |
+            AI Product Development Manager created one scoped enhancement.
+            Review accessibility, usability, performance, real website behavior,
+            Vercel preview, and passing tests before merge.
+            NEVER merge blindly; no odds calculations or API changes are authorized.
+            See PRODUCT_DEVELOPMENT_AGENT.md and AGENTS.md.
+          add-paths: |
+            *.html
+            *.css
+            live.js
+            app.js
+            tests/*.test.cjs
