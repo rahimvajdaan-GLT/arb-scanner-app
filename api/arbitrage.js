@@ -1,4 +1,4 @@
-const ENGINE='au-openbooks-v43-quote-integrity';
+const ENGINE='au-openbooks-v44-pointsbet-match-winner';
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=30*60*1000;
 // Each scan is a bounded SAMPLE, not an exhaustive market-wide search.
@@ -116,6 +116,20 @@ function samplePreferred(rows,size,anchors=[],now=Date.now()){
   const remaining=rows.filter(row=>!seen.has(row.id));
   return [...matched,...sampleRotating(remaining,size-matched.length,now)];
 }
+function pointsBetFullMatchWinner(m,fixture){
+  if(!m||typeof m!=='object'||m.isOpenForBetting===false||m.is_open_for_betting===false||m.suspended===true)return false;
+  const label=String(m.name??m.displayName??'').trim();
+  // Full-match market only. An optional parenthesized fixture is common in
+  // PointsBet tennis cards: "Match Winner (Sopko, Martin v Saleny, Petr)".
+  // Validate both named competitors to avoid admitting 1st-game/set markets.
+  const match=label.match(/^(match result|match betting|head to head|head-to-head|moneyline|match winner|winner|full time result|full-time result|game winner)(?:\s*\((.+)\))?$/i);
+  if(!match)return false;
+  if(!match[2])return true;
+  const named=teams(match[2]);
+  if(!named)return false;
+  return (same(named.home,fixture.home)&&same(named.away,fixture.away))||
+    (same(named.home,fixture.away)&&same(named.away,fixture.home));
+}
 async function pointsBet(sport=''){
   const h={'Origin':'https://pointsbet.com.au','Referer':'https://pointsbet.com.au/'};
   const feed=await getJson('https://api.au.pointsbet.com/api/v2/events/nextup?v2Limit=80',h);
@@ -125,7 +139,7 @@ async function pointsBet(sport=''){
   const upcoming=sampleRotating(eligible,6);
   const details=await Promise.allSettled(upcoming.map(head=>getJson(`https://api.au.pointsbet.com/api/mes/v3/events/${encodeURIComponent(head.key)}`,h,16000).then(detail=>({head,detail}))));
   const out=[],rejected={missing_teams:0,no_full_match_market:0,invalid_prices:0};
-  let failures=0;const market_examples=[];
+  let failures=0;const market_examples=[];const rejected_price_examples=[];
   for(const r of details){
     if(r.status!=='fulfilled'){failures++;continue}
     const{head,detail}=r.value;
@@ -134,7 +148,7 @@ async function pointsBet(sport=''){
     const ta=hh&&aa?{home:hh,away:aa}:teams(detail?.name||head?.name);
     if(!ta){rejected.missing_teams++;continue}
     const ms=Array.isArray(detail?.fixedOddsMarkets)?detail.fixedOddsMarkets:[];
-    const m=ms.find(x=>/^(match result|match betting|head to head|head-to-head|moneyline|match winner|winner|full time result|full-time result|game winner)$/i.test(String(x?.name||'').trim())&&x?.isOpenForBetting!==false);
+    const m=ms.find(x=>pointsBetFullMatchWinner(x,ta));
     if(!m){
       rejected.no_full_match_market++;
       if(market_examples.length<2)market_examples.push(ms.map(x=>String(x?.name||'')).filter(Boolean).slice(0,8));
@@ -142,9 +156,19 @@ async function pointsBet(sport=''){
     }
     const sels=objValues(m?.outcomes).filter(o=>o?.isOpenForBetting!==false).map(o=>({name:o?.name,odds:o?.price}));
     const item=eventObj(sportOf(`${head?.sportKey||''} ${head?.competitionName||''} ${detail?.competitionName||''}`),ta.home,ta.away,detail?.startsAt||head?.startsAt,'PointsBet AU',sels,'pointsbet');
-    if(item)out.push(item);else rejected.invalid_prices++;
+    if(item)out.push(item);
+    else {
+      rejected.invalid_prices++;
+      if(rejected_price_examples.length<2)rejected_price_examples.push({
+        market:String(m?.name||'').slice(0,120),
+        fixture:ta.home+' vs '+ta.away,
+        outcome_names:sels.map(x=>String(x.name||'')).slice(0,6),
+        outcome_count:sels.length,
+        price_fields:objValues(m?.outcomes).slice(0,2).map(x=>Object.keys(x||{}).slice(0,8))
+      });
+    }
   }
-  return {events:out,listed:rows.length,candidates:eligible.length,cards:details.length,card_failures:failures,rejected,market_examples};
+  return {events:out,listed:rows.length,candidates:eligible.length,cards:details.length,card_failures:failures,rejected,market_examples,rejected_price_examples};
 }
 
 function entainDecimal(x){
@@ -729,7 +753,7 @@ async function scan(sport,includeKrok=false,includeOdds=false){
   const pe=points.events;
   if(pr.status==='fulfilled')providers.push({provider:'PointsBet AU',ok:true,events:pe.length,listed:points.listed,
     candidates:points.candidates,cards:points.cards,card_failures:points.card_failures,
-    rejected:points.rejected,market_examples:points.market_examples});
+    rejected:points.rejected,market_examples:points.market_examples,rejected_price_examples:points.rejected_price_examples});
   else providers.push({provider:'PointsBet AU',ok:false,events:0,error:String(pr.reason?.message||pr.reason).slice(0,200)});
   const empty={events:[],listed:0,cards:0,cardFailures:0,categoryErrors:[]};
   const neds=nr.status==='fulfilled'?nr.value:empty;
