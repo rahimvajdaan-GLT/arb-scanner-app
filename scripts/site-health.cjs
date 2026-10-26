@@ -3,6 +3,7 @@
 // Health monitor does NOT fetch /api/arbitrage or consume bookmaker API quota.
 const fs=require('node:fs');
 const path=require('node:path');
+const SEO=require('./seo-manager.cjs');
 const DEFAULT_SITE='https://arb-scanner-app.vercel.app';
 function baseUrl(raw){
   const u=new URL(raw||DEFAULT_SITE);
@@ -23,7 +24,7 @@ async function request(base,p,fetchImpl){
         headers:{Accept:'text/html,application/json,text/javascript,*/*','Cache-Control':'no-cache','User-Agent':'TopNotchArb-Maintainer/1.0'},
         signal:AbortSignal.timeout(12000)
       });
-      if(!response.ok)throw new Error('HTTP '+response.status);
+      if(response.status!==200)throw new Error('HTTP '+response.status);
       const body=await response.text();
       if(body.length>1250000)throw new Error('Response unexpectedly large');
       return body;
@@ -61,6 +62,21 @@ async function runChecks({siteUrl=DEFAULT_SITE,fetchImpl=fetch,localHtml}={}){
     const ok=Array.isArray(data)&&data.some(item=>item&&item.key&&item.title);
     record('sports-catalog',ok,ok?data.length+' sports returned':'Missing or invalid sports catalog');
   }catch(e){record('sports-catalog',false,e.message)}
+  // Static production SEO checks use only quota-free files, never bookmaker endpoints.
+  // Compare exact bytes with the deterministic local generator so stale, malformed,
+  // redirected or incorrectly routed SEO assets are reported as deployment defects.
+  const seoAssets=[
+    ['/robots.txt','robots-txt',SEO.robots()],
+    ['/sitemap.xml','sitemap-xml',SEO.sitemap(SEO.analyze().included)]
+  ];
+  for(const [resource,name,expected] of seoAssets){
+    try{
+      const actual=await request(base,resource,fetchImpl);
+      const ok=actual===expected;
+      record(name,ok,ok?'Matches deterministic repository SEO output':
+        'Production '+resource+' differs from deterministic repository SEO output');
+    }catch(e){record(name,false,e.message)}
+  }
   return {checkedAt:new Date().toISOString(),site:base,ok:checks.every(x=>x.status==='pass'),checks,
     oddsApiTested:false,note:'No bookmaker API requests. Cannot guarantee profitable opportunities.'};
 }
