@@ -66,7 +66,7 @@ test('health checker rejects missing, redirected, malformed or stale production 
     {name:'redirected sitemap',resource:'/sitemap.xml',response:mocked(302,''),check:'sitemap-xml'},
     {name:'malformed sitemap',resource:'/sitemap.xml',response:mocked(200,'<urlset>'),check:'sitemap-xml'},
     {name:'stale sitemap',resource:'/sitemap.xml',response:mocked(200,expectedMap.replace('/scanner.html','/removed.html')),check:'sitemap-xml'},
-    {name:'robots missing sitemap directive',resource:'/robots.txt',response:mocked(200,SEO.robots().replace(/^Sitemap:.*\\n/m,'')),check:'robots-txt'},
+    {name:'robots missing sitemap directive',resource:'/robots.txt',response:mocked(200,SEO.robots().replace(/^Sitemap:.*$/m,'')),check:'robots-txt'},
     {name:'redirected robots',resource:'/robots.txt',response:mocked(302,''),check:'robots-txt'}
   ];
   for(const scenario of cases){
