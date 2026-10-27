@@ -5,6 +5,13 @@ const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const SEO=require('../scripts/seo-manager.cjs');
 
 const SITE=SEO.ORIGIN;
+test('pricing page exposes its main heading at level one',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'..','pricing.html'),'utf8');
+ const main=html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)?.[1];
+ assert.ok(main,'pricing page has a main landmark');
+ assert.equal((main.match(/<h1\b/g)||[]).length,1,'one main heading is available to heading navigation');
+ assert.match(main,/<h1\b[^>]*>Simple access while Top Notch Arb is in beta<\/h1>/);
+});
 test('market guide describes current scanner coverage without advertising unavailable markets',()=>{
  const html=fs.readFileSync(path.join(__dirname,'..','how-it-works.html'),'utf8');
  const section=html.match(/<h2>Moneyline, spreads and totals<\/h2><p>(.*?)<\/p>/)?.[1];
