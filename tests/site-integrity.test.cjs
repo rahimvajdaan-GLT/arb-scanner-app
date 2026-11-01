@@ -32,6 +32,15 @@ test('scanner renders positive-only results and a transparent scan summary',()=>
  assert.ok(js.includes("params.set('debug', '1')"),'required diagnostics missing');
  assert.ok(!html.includes("fetch('/api/arbitrage?"),'diagnostics must not fetch separately');
 });
+test('scanner provides a keyboard skip link to focusable main content',()=>{
+ const html=read('scanner.html');
+ assert.match(html,/<body><a class="scanner-skip-link" href="#scannerContent">Skip to scanner content<\/a><header/);
+ assert.match(html,/<main class="main" id="scannerContent" tabindex="-1">/);
+ assert.equal((html.match(/id="scannerContent"/g)||[]).length,1);
+ assert.match(html,/\.scanner-skip-link\{[^}]*position:fixed;[^}]*z-index:100;[^}]*transform:translateY\(-200%\)/);
+ assert.match(html,/\.scanner-skip-link:focus\{[^}]*transform:translateY\(0\);outline:3px solid #315fd8/);
+ assert.match(html,/#scannerContent\{scroll-margin-top:100px\}/);
+});
 test('market selectors are honest about supported markets',()=>{
  const html=read('scanner.html');
  assert.match(html,/<option value="spreads" disabled>/);
