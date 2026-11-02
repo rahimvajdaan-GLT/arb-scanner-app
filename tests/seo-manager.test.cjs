@@ -5,6 +5,17 @@ const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const SEO=require('../scripts/seo-manager.cjs');
 
 const SITE=SEO.ORIGIN;
+test('public scanner explanations describe positive rounded results without an unavailable value mode',()=>{
+ for(const page of ['index.html','about.html','faq.html']){
+  const html=fs.readFileSync(path.join(__dirname,'..',page),'utf8');
+  assert.match(html,/theoretical quoted-price arbitrage with positive profit and ROI after stake rounding/,page);
+  assert.doesNotMatch(html,/value comparisons|value rows|What does VALUE mean|guaranteed-return condition/i,page);
+ }
+ const faq=fs.readFileSync(path.join(__dirname,'..','faq.html'),'utf8');
+ assert.match(faq,/sampled fixtures or with your current filters/);
+ assert.match(faq,/Missing or rate-limited feeds can also reduce coverage/);
+ assert.match(faq,/Positive quoted returns do not guarantee profit/);
+});
 test('pricing page exposes its main heading at level one',()=>{
  const html=fs.readFileSync(path.join(__dirname,'..','pricing.html'),'utf8');
  const main=html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)?.[1];
