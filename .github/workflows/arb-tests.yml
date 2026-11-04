@@ -22,3 +22,5 @@ jobs:
           node-version: '22'
       - name: Test odds, matching, and frontend safety
         run: node --test tests/*.test.cjs
+      - name: Verify deterministic sitemap and robots files
+        run: node scripts/seo-manager.cjs --check
