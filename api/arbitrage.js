@@ -566,7 +566,7 @@ function priceAudit(b){
     byRole[pool.roles[i]]=pool.options[i].map(o=>({role:o.role,odds:o.odds,book:o.book}));
   }
   const allBooks=[...new Set(pool.options.flat().map(o=>o.book))];
-  return {fixture:b.home+' vs '+b.away,sport:b.sport,
+  return {fixture:b.home+' vs '+b.away,sport:b.sport,commence_time:b.time,
     roi_pct:Number(((1/pool.inv-1)*100).toFixed(3)),outcomes:pool.count,
     books:allBooks,bookmaker_count:allBooks.length,
     all_bookmaker_prices:byRole,best_odds:pool.chosen.map(o=>({role:o.role,odds:o.odds,book:o.book}))};
