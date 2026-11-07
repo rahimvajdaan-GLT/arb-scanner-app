@@ -121,7 +121,7 @@ test('frontend invalidates old quotes and refreshes the versioned script',()=>{
  assert.match(front,/MAX_QUOTE_AGE_MS = 2 \* 60 \* 1000/);
  assert.match(front,/latestEvents = \[\];/);
  assert.match(html,/arb:scan-expired/);
- assert.match(html,/live\.js\?v=46/);
+ assert.match(html,/live\.js\?v=47/);
 });
 
 test('nested Entain event cards with decimal numeric odds yield two valid selections',()=>{
@@ -188,7 +188,7 @@ test('extra feed only runs on user opt-in; auto refresh cannot drain free quota'
  assert.match(front,/include_krok/);
  assert.match(front,/if \(liveEls\.extraFeed\.checked\) \{/);
  assert.match(front,/liveEls\.autoRefresh\.checked = false/);
- assert.match(page,/live\.js\?v=46/);
+ assert.match(page,/live\.js\?v=47/);
 });
 
 test('exclude exchange prices until commission and liquidity are modeled',()=>{
@@ -233,7 +233,7 @@ test('The Odds API optional source is manual, with no upfront call or public key
  assert.match(front,/include_odds_api/);
  assert.match(front,/liveEls\.oddsApi\.checked/);
  assert.match(page,/id="liveOddsApi"/);
- assert.match(page,/live\.js\?v=46/);
+ assert.match(page,/live\.js\?v=47/);
 });
 
 test('bookmaker fixture sample moves through different events between 15-minute windows',()=>{
@@ -256,7 +256,8 @@ test('sampling and API cache do not display impossible five-minute live quotes',
  const front=fs.readFileSync(path.join(__dirname,'../live.js'),'utf8');
  assert.match(backend,/s-maxage=90/);
  assert.match(front,/MAX_QUOTE_AGE_MS = 2 \* 60 \* 1000/);
- assert.match(backend,/limit:'10'/);
+ assert.match(backend,/SOCK_STANDARD_LIMIT=10/);
+ assert.match(backend,/SOCK_WIDE_LIMIT=20/);
  assert.match(backend,/ENTAIN_CARDS_FILTERED=6/);
 });
 test('bookmaker filters are applied to positive opportunity cards',()=>{
@@ -349,5 +350,23 @@ test('no loss figures or one-bookmaker cards are shown in the user-facing scan b
  assert.doesNotMatch(html,/id="comparisonRows"/);
  assert.match(html,/id="scanCoverageText"/);
  assert.match(html,/id="feedDetails"/);
- assert.match(html,/live\.js\?v=46/);
+ assert.match(html,/live\.js\?v=47/);
+});
+
+test('manual wide mode is opt-in and cannot silently exhaust API credits',()=>{
+ const backend=fs.readFileSync(path.join(__dirname,'../api/arbitrage.js'),'utf8');
+ const frontend=fs.readFileSync(path.join(__dirname,'../live.js'),'utf8');
+ const html=fs.readFileSync(path.join(__dirname,'../scanner.html'),'utf8');
+ assert.match(backend,/wide_scan/);
+ assert.match(backend,/sockOdds\(wide\)/);
+ assert.match(backend,/SOCK_WIDE_LIMIT=20/);
+ assert.match(backend,/wide\?':wide':''/);
+ assert.match(frontend,/params\.set\('wide_scan', '1'\)/);
+ assert.match(frontend,/if \(liveEls\.wideScan\.checked\) liveEls\.autoRefresh\.checked=false/);
+ assert.match(html,/id="wideScan"/);
+});
+test('legacy blocked direct bookmaker feeds are off by default',()=>{
+ const backend=fs.readFileSync(path.join(__dirname,'../api/arbitrage.js'),'utf8');
+ assert.match(backend,/ENABLE_AUTHORIZED_ENTAIN_DIRECT/);
+ assert.match(backend,/Direct endpoint disabled/);
 });
