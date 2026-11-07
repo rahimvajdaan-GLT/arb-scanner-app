@@ -7,6 +7,7 @@ const liveEls = {
   autoRefresh: document.getElementById('autoRefresh'),
   extraFeed: document.getElementById('liveExtraFeed'),
   oddsApi: document.getElementById('liveOddsApi'),
+  wideScan: document.getElementById('wideScan'),
   lastUpdated: document.getElementById('lastUpdated'),
   message: document.getElementById('liveMessage'),
   results: document.getElementById('liveResults'),
@@ -316,6 +317,7 @@ async function scanLive() {
   if (sport) params.set('sport_key', sport);
   if (liveEls.extraFeed?.checked) params.set('include_krok', '1');
   if (liveEls.oddsApi?.checked) params.set('include_odds_api', '1');
+  if (liveEls.wideScan?.checked) params.set('wide_scan', '1');
   params.set('market_mode', liveEls.market.value || 'all');
   params.set('min_profit_pct', '0');
   params.set('debug', '1');
@@ -380,7 +382,7 @@ async function scanLive() {
 function configureAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = null;
-  if (liveEls.autoRefresh.checked && !liveEls.extraFeed?.checked && !liveEls.oddsApi?.checked) {
+  if (liveEls.autoRefresh.checked && !liveEls.extraFeed?.checked && !liveEls.oddsApi?.checked && !liveEls.wideScan?.checked) {
     refreshTimer = setInterval(scanLive, 900000);
   }
 }
@@ -394,6 +396,11 @@ function setBookPreset(value) {
 
 liveEls.scanBtn.addEventListener('click', scanLive);
 liveEls.autoRefresh.addEventListener('change', configureAutoRefresh);
+if (liveEls.wideScan) liveEls.wideScan.addEventListener('change', ()=>{
+  if (liveEls.wideScan.checked) liveEls.autoRefresh.checked=false;
+  configureAutoRefresh();
+  liveEls.message.textContent=liveEls.wideScan.checked?'Wider manual scan enabled (up to 20 SockOdds event records). Uses more of your monthly object allowance. Click Scan once.':'Standard scan selected (up to 10 SockOdds event records).';
+});
 if (liveEls.extraFeed) liveEls.extraFeed.addEventListener('change', ()=>{
   // Protect free API call allowance: optional feed always requires manual scans.
   if (liveEls.extraFeed.checked) {
