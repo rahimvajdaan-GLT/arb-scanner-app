@@ -32,6 +32,14 @@ test('scanner renders positive-only results and a transparent scan summary',()=>
  assert.ok(js.includes("params.set('debug', '1')"),'required diagnostics missing');
  assert.ok(!html.includes("fetch('/api/arbitrage?"),'diagnostics must not fetch separately');
 });
+test('scanner status updates are announced without moving keyboard focus',()=>{
+ const html=read('scanner.html');
+ const messages=[...html.matchAll(/<div\b[^>]*\bid="liveMessage"[^>]*>/g)];
+ assert.equal(messages.length,1,'provide one persistent scanner status region');
+ assert.match(messages[0][0],/role="status"/,'status provides implicit polite live announcements');
+ assert.match(messages[0][0],/aria-atomic="true"/,'announce the complete updated message');
+ assert.doesNotMatch(messages[0][0],/tabindex=|autofocus/,'announcements must not require moving focus');
+});
 test('scanner provides a keyboard skip link to focusable main content',()=>{
  const html=read('scanner.html');
  assert.match(html,/<body><a class="scanner-skip-link" href="#scannerContent">Skip to scanner content<\/a><header/);
