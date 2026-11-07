@@ -1,4 +1,6 @@
-const ENGINE='au-openbooks-v44-pointsbet-match-winner';
+const ENGINE='au-openbooks-v45-manual-coverage';
+const SOCK_STANDARD_LIMIT=10;
+const SOCK_WIDE_LIMIT=20;
 const FUTURE_BUFFER_MS=10*60*1000;
 const MATCH_WINDOW_MS=30*60*1000;
 // Each scan is a bounded SAMPLE, not an exhaustive market-wide search.
@@ -489,16 +491,18 @@ function arb(b){
 
 const SOCK_LEAGUES=['nfl','nba','nhl','epl','atp','mlb','la_liga','wta','bundesliga','serie_a'];
 const sockCache={until:0,promise:null};
-async function sockOdds(){
+async function sockOdds(wide=false){
   const key=process.env.SOCKODDS_API_KEY;
   if(!key)return {events:[],rawEvents:0,configured:false,error:'SOCKODDS_API_KEY not configured on this deployment'};
-  if(sockCache.promise&&sockCache.until>Date.now())return sockCache.promise;
+  const limit=wide?SOCK_WIDE_LIMIT:SOCK_STANDARD_LIMIT;
+  if(sockCache.promise&&sockCache.until>Date.now()&&sockCache.limit===limit)return sockCache.promise;
+  sockCache.limit=limit;
   sockCache.until=Date.now()+5*60*1000;
   sockCache.promise=(async()=>{
     const events=[];let rawEvents=0;const observed=new Set();
     try{
       // Use the previously verified query; league-filtered requests returned HTTP 403.
-      const params=new URLSearchParams({markets:'winner',regions:'au',group_by:'bookmaker',limit:'10',starts_after:new Date().toISOString()});
+      const params=new URLSearchParams({markets:'winner',regions:'au',group_by:'bookmaker',limit:String(limit),starts_after:new Date().toISOString()});
       const c=new AbortController(),timer=setTimeout(()=>c.abort(),13000);
       let r;
       try{r=await fetch('https://api.sockodds.com/v1/odds?'+params,{headers:{Authorization:'Bearer '+key,Accept:'application/json'},signal:c.signal})}
@@ -728,7 +732,7 @@ async function theOddsApi(sport,enabled){
   theOddsCache.set(code,{until:Date.now()+5*60*1000,promise});
   return promise;
 }
-async function scan(sport,includeKrok=false,includeOdds=false){
+async function scan(sport,includeKrok=false,includeOdds=false,wide=false){
   const providers=[];
   // Opportunistic bookmaker matching: price feeds already resolved while
   // event lists are fetched give Entain a chance to prioritize SAME fixtures.
@@ -739,12 +743,14 @@ async function scan(sport,includeKrok=false,includeOdds=false){
     anchors.push(...events);
     return data;
   });
-  const pbTask=observe(pointsBet(sport)),sockTask=observe(sockOdds());
+  const pbTask=observe(pointsBet(sport)),sockTask=observe(sockOdds(wide));
   const krokTask=observe(krokOdds(sport,includeKrok)),oddsTask=observe(theOddsApi(sport,includeOdds));
   const [pr,nr,lr,sr,kr,or]=await Promise.allSettled([
     pbTask,
-    entainBook('api.neds.com.au','Neds',anchors,sport),
-    entainBook('api.ladbrokes.com.au','Ladbrokes AU',anchors,sport),
+    // Legacy unauthenticated Entain endpoints return HTTP 403; never bypass access controls.
+    // The opt-in flag is for deployments with explicit authorization only.
+    process.env.ENABLE_AUTHORIZED_ENTAIN_DIRECT==='1' ? entainBook('api.neds.com.au','Neds',anchors,sport) : Promise.resolve({events:[],listed:0,cards:0,categoryErrors:['Direct endpoint disabled (requires authorized provider access)']}),
+    process.env.ENABLE_AUTHORIZED_ENTAIN_DIRECT==='1' ? entainBook('api.ladbrokes.com.au','Ladbrokes AU',anchors,sport) : Promise.resolve({events:[],listed:0,cards:0,categoryErrors:['Direct endpoint disabled (requires authorized provider access)']}),
     sockTask,
     krokTask,
     oddsTask
@@ -769,7 +775,7 @@ async function scan(sport,includeKrok=false,includeOdds=false){
     else providers.push({provider:name,ok:false,events:0,error:String(result.reason?.message||result.reason).slice(0,200)});
   }
   const sock=sr.status==='fulfilled'?sr.value:{events:[],rawEvents:0,configured:true,error:String(sr.reason?.message||sr.reason)};
-  providers.unshift({provider:'SockOdds',ok:!sock.error,events:sock.events.length,listed:sock.rawEvents??0,limit:10,league:sock.league,configured:sock.configured,bookmakers:sock.bookmakers??[],bookmaker_count:sock.bookmakers?.length??0,retry_at:sock.retry_at,error:sock.error});
+  providers.unshift({provider:'SockOdds',ok:!sock.error,events:sock.events.length,listed:sock.rawEvents??0,limit:wide?SOCK_WIDE_LIMIT:SOCK_STANDARD_LIMIT,league:sock.league,configured:sock.configured,bookmakers:sock.bookmakers??[],bookmaker_count:sock.bookmakers?.length??0,retry_at:sock.retry_at,error:sock.error});
   const krok=kr.status==='fulfilled'?kr.value:{events:[],configured:!!process.env.KROK_ODDS_API_KEY,error:'Krok integration unavailable'};
   if(includeKrok)providers.push({provider:'Krok Odds (optional)',ok:!krok.error,events:krok.events.length,listed:krok.listed??0,configured:krok.configured,bookmakers:krok.bookmakers??[],stale:krok.stale??0,slug:krok.slug,error:krok.error});
   const third=or.status==='fulfilled'?or.value:{events:[],configured:!!process.env.THE_ODDS_API_KEY,error:'The Odds API request unavailable'};
@@ -807,7 +813,7 @@ async function scan(sport,includeKrok=false,includeOdds=false){
     return {fixture:b.home+' vs '+b.away,sport:b.sport,commence_time:b.time,
       bookmaker_count:1,books:[...b.books],all_bookmaker_prices:byRole,best_odds:quotes};
   });
-  return {engine:ENGINE,scanned_at:new Date().toISOString(),providers,active_bookmakers:distinctBooks,active_bookmaker_count:distinctBooks.length,merged_games:buckets.length,cross_book_games:cross.length,comparable_markets:audited.length,validation_reasons:auditReasons,rejected_examples:rejectedExamples,closest_markets:audited.slice(0,5),comparisons:audited.slice(0,35),single_book_games_total:singles.length,single_book_games:singleGames,arbs:arbs.length,results:arbs,scan_scope:'Sampled fixtures only — not exhaustive. Neds/Ladbrokes rotate event cards every 15 minutes; SockOdds checks at most 10 event pages. Other live providers vary by quota.'};
+  return {engine:ENGINE,scanned_at:new Date().toISOString(),providers,active_bookmakers:distinctBooks,active_bookmaker_count:distinctBooks.length,merged_games:buckets.length,cross_book_games:cross.length,comparable_markets:audited.length,validation_reasons:auditReasons,rejected_examples:rejectedExamples,closest_markets:audited.slice(0,5),comparisons:audited.slice(0,35),single_book_games_total:singles.length,single_book_games:singleGames,arbs:arbs.length,results:arbs,scan_scope:'Sampled fixtures only — not exhaustive. SockOdds checks up to '+(wide?SOCK_WIDE_LIMIT:SOCK_STANDARD_LIMIT)+' event records per request. Legacy Neds/Ladbrokes direct endpoints are disabled without authorized access. Other feeds vary by quota.'};
 }
 export default async function handler(req,res){
   if(req.method!=='GET'){res.setHeader('Allow','GET');return res.status(405).json({error:'Method not allowed'})}
@@ -815,12 +821,13 @@ export default async function handler(req,res){
   const sport=ALIASES.get(raw)||raw,mode=String(req.query.market_mode||'all').toLowerCase(),debug=String(req.query.debug||'')==='1';
   if(!['all','h2h','lines','spreads','totals'].includes(mode))return res.status(400).json({error:'Unsupported market_mode'});
   if(!['all','h2h'].includes(mode)&&!debug)return res.status(200).json([]);
+  const wide=String(req.query.wide_scan||'')==='1';
   const includeKrok=String(req.query.include_krok||'')==='1';
   const includeOdds=String(req.query.include_odds_api||'')==='1';
   if(includeKrok&&includeOdds)return res.status(400).json({error:'Choose one optional aggregator to conserve limited API credits'});
-  const key=(sport||'all')+(includeKrok?':krok':'')+(includeOdds?':odds':'');let item=scanCache.get(key);
+  const key=(sport||'all')+(includeKrok?':krok':'')+(includeOdds?':odds':'')+(wide?':wide':'');let item=scanCache.get(key);
   if(!item||item.expires<Date.now()){
-    item={expires:Date.now()+90*1000,promise:scan(sport,includeKrok,includeOdds)};
+    item={expires:Date.now()+90*1000,promise:scan(sport,includeKrok,includeOdds,wide)};
     scanCache.set(key,item);
   }
   try{
