@@ -8,7 +8,7 @@ const api=fs.readFileSync(path.join(__dirname,'../api/arbitrage.js'),'utf8');
 test('games board is loaded on scanner without an extra API request',()=>{
  assert.match(html,/id="gamesBoard"/);
  assert.match(html,/id="gamesBoardMode"/);
- assert.match(html,/games-board\.js\?v=1/);
+ assert.match(html,/games-board\.js\?v=\d+/);
  assert.match(js,/addEventListener\('arb:scan'/);
  assert.doesNotMatch(js,/fetch\s*\(/);
 });
