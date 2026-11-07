@@ -370,3 +370,27 @@ test('legacy blocked direct bookmaker feeds are off by default',()=>{
  assert.match(backend,/ENABLE_AUTHORIZED_ENTAIN_DIRECT/);
  assert.match(backend,/Direct endpoint disabled/);
 });
+
+test('SockOdds timeout is reported as a temporary failure and not cached for five minutes', async()=>{
+ const scope={console,Date,URL,URLSearchParams,AbortController,
+  setTimeout:(cb)=>{cb();return 1},clearTimeout:()=>{},
+  process:{env:{SOCKODDS_API_KEY:'test-key'}},calls:0};
+ scope.fetch=async (_url,options)=>{
+  scope.calls++;
+  if(options.signal.aborted){const err=new Error('aborted');err.name='AbortError';throw err;}
+  throw Error('expected aborted signal');
+ };
+ vm.runInNewContext(js+'\\nthis.sockOdds=sockOdds;this.sockCache=sockCache;',scope);
+ const out=await scope.sockOdds();
+ assert.match(out.error,/timed out after 22 seconds/);
+ const left=scope.sockCache.until-Date.now();
+ assert.ok(left>0&&left<=21000,'timeout must use short retry cache');
+ assert.equal(scope.calls,1);
+});
+test('empty scans have short CDN and in-memory caching',()=>{
+ const backend=fs.readFileSync(path.join(__dirname,'../api/arbitrage.js'),'utf8');
+ assert.match(backend,/s-maxage=15/);
+ assert.match(backend,/item\.expires=Math\.min\(item\.expires,Date\.now\(\)\+15\*1000\)/);
+ assert.match(backend,/SOCK_REQUEST_TIMEOUT_MS=22000/);
+ assert.match(backend,/SOCK_TRANSIENT_RETRY_MS=20000/);
+});
