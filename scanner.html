@@ -39,9 +39,13 @@
   </div>
   <div id="scanCoverageText" role="status" class="comparison-empty">Choose a sport and select Scan Opportunities. Results depend on available bookmaker data and API limits.</div>
 </section>
+<section id="gamesBoardSection" class="comparison-section" aria-label="Available games and bookmaker odds">
+<div class="comparison-header"><div><div class="eyebrow">ACTUAL QUOTED GAMES · NOT ALL ARE PROFITABLE</div><h2>Available Games &amp; Best Odds</h2><p>Displays sampled matches even without arbitrage. Prices come from the same scan; verify them directly at the bookmaker.</p></div><label>View <select id="gamesBoardMode" aria-label="Games view"><option value="all">All available games</option><option value="compare">Multi-bookmaker comparisons</option><option value="single">Single-bookmaker games</option></select></label></div>
+<p id="gamesBoardSummary" class="comparison-empty">Scan to see available matches and prices.</p><div id="gamesBoard" class="comparison-rows" aria-live="polite"></div>
+</section>
 <div id="liveResults" class="live-results"></div>
 <details id="feedDetails" class="scan-feed-details"><summary>Feed health &amp; scan details</summary><div id="feedDiagnostics" class="scan-feed-lines">Scan first to check provider health.</div></details>
-</section><footer>Top Notch Arb · Australian arbitrage scanner</footer></main></div></div><script src="/live.js?v=46"></script><script>
+</section><footer>Top Notch Arb · Australian arbitrage scanner</footer></main></div></div><script src="/live.js?v=46"></script><script src="/games-board.js?v=1" defer></script><script>
 // Positive opportunities are rendered by live.js, with profit and stake checks.
 // This panel reports factual coverage and feed health without advertising losses.
 (()=>{
