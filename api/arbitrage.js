@@ -842,6 +842,7 @@ export default async function handler(req,res){
   }
   try{
     const data=await item.promise;
+    if(!Number(data.active_bookmaker_count))item.expires=Math.min(item.expires,Date.now()+15*1000);
     // Do not keep a transient all-source failure in the CDN for 90 seconds.
     const hasQuotes=Number(data.active_bookmaker_count)>0;
     res.setHeader('Cache-Control',hasQuotes?'public, max-age=0, s-maxage=90':'public, max-age=0, s-maxage=15');
