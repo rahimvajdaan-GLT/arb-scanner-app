@@ -380,7 +380,7 @@ test('SockOdds timeout is reported as a temporary failure and not cached for fiv
   if(options.signal.aborted){const err=new Error('aborted');err.name='AbortError';throw err;}
   throw Error('expected aborted signal');
  };
- vm.runInNewContext(js+'\\nthis.sockOdds=sockOdds;this.sockCache=sockCache;',scope);
+ vm.runInNewContext(js+'\nthis.sockOdds=sockOdds;this.sockCache=sockCache;',scope);
  const out=await scope.sockOdds();
  assert.match(out.error,/timed out after 22 seconds/);
  const left=scope.sockCache.until-Date.now();
