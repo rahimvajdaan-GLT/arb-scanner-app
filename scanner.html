@@ -32,20 +32,21 @@
   <div class="comparison-header">
     <div>
       <div class="eyebrow">PROFITABLE OPPORTUNITIES ONLY</div>
-      <h2>Verified Positive Arbitrage</h2>
+      <h2>Profitable Arbitrage Opportunities</h2>
       <p>The scanner shows only positive theoretical profit after calculating the complete stake split. Non-profitable prices are not shown.</p>
     </div>
     <span id="scanCoverageCount">Not scanned</span>
   </div>
   <div id="scanCoverageText" role="status" class="comparison-empty">Choose a sport and select Scan Opportunities. Results depend on available bookmaker data and API limits.</div>
 </section>
-<section id="gamesBoardSection" class="comparison-section" aria-label="Available games and bookmaker odds">
-<div class="comparison-header"><div><div class="eyebrow">ACTUAL QUOTED GAMES · NOT ALL ARE PROFITABLE</div><h2>Available Games &amp; Best Odds</h2><p>Displays sampled matches even without arbitrage. Prices come from the same scan; verify them directly at the bookmaker.</p></div><label>View <select id="gamesBoardMode" aria-label="Games view"><option value="all">All available games</option><option value="compare">Multi-bookmaker comparisons</option><option value="single">Single-bookmaker games</option></select></label></div>
-<p id="gamesBoardSummary" class="comparison-empty">Scan to see available matches and prices.</p><div id="gamesBoard" class="comparison-rows" aria-live="polite"></div>
-</section>
 <div id="liveResults" class="live-results"></div>
+<details id="otherGamesDisclosure" class="comparison-section" aria-label="Available games and bookmaker odds">
+<summary style="cursor:pointer;font-weight:700;margin-bottom:12px">Other games (not necessarily profitable) — hidden by default</summary><div class="comparison-header"><div><div class="eyebrow">ACTUAL QUOTED GAMES · NOT ALL ARE PROFITABLE</div><h2>Other Games &amp; Best Odds</h2><p>Displays sampled matches even without arbitrage. Prices come from the same scan; verify them directly at the bookmaker.</p></div><label>View <select id="gamesBoardMode" aria-label="Games view"><option value="all">All available games</option><option value="compare">Multi-bookmaker comparisons</option><option value="single">Single-bookmaker games</option></select></label></div>
+<p id="gamesBoardSummary" class="comparison-empty">Scan to see available matches and prices.</p><div id="gamesBoard" class="comparison-rows" aria-live="polite"></div>
+</details>
+
 <details id="feedDetails" class="scan-feed-details"><summary>Feed health &amp; scan details</summary><div id="feedDiagnostics" class="scan-feed-lines">Scan first to check provider health.</div></details>
-</section><footer>Top Notch Arb · Australian arbitrage scanner</footer></main></div></div><script src="/live.js?v=46"></script><script src="/games-board.js?v=1" defer></script><script>
+</section><footer>Top Notch Arb · Australian arbitrage scanner</footer></main></div></div><script src="/live.js?v=46"></script><script src="/games-board.js?v=2" defer></script><script>
 // Positive opportunities are rendered by live.js, with profit and stake checks.
 // This panel reports factual coverage and feed health without advertising losses.
 (()=>{
