@@ -490,7 +490,9 @@ function arb(b){
 }
 
 const SOCK_LEAGUES=['nfl','nba','nhl','epl','atp','mlb','la_liga','wta','bundesliga','serie_a'];
-const sockCache={until:0,promise:null};
+const sockCache={until:0,promise:null,limit:0};
+const SOCK_REQUEST_TIMEOUT_MS=22000;
+const SOCK_TRANSIENT_RETRY_MS=20000;
 async function sockOdds(wide=false){
   const key=process.env.SOCKODDS_API_KEY;
   if(!key)return {events:[],rawEvents:0,configured:false,error:'SOCKODDS_API_KEY not configured on this deployment'};
@@ -503,7 +505,7 @@ async function sockOdds(wide=false){
     try{
       // Use the previously verified query; league-filtered requests returned HTTP 403.
       const params=new URLSearchParams({markets:'winner',regions:'au',group_by:'bookmaker',limit:String(limit),starts_after:new Date().toISOString()});
-      const c=new AbortController(),timer=setTimeout(()=>c.abort(),13000);
+      const c=new AbortController(),timer=setTimeout(()=>c.abort(),SOCK_REQUEST_TIMEOUT_MS);
       let r;
       try{r=await fetch('https://api.sockodds.com/v1/odds?'+params,{headers:{Authorization:'Bearer '+key,Accept:'application/json'},signal:c.signal})}
       finally{clearTimeout(timer)}
@@ -522,7 +524,10 @@ async function sockOdds(wide=false){
         const reason=monthly?'SockOdds monthly allowance exhausted; no requests until next UTC month':hasRetry?'SockOdds rate limit (Retry-After supplied)':'SockOdds HTTP 429: rate or quota exhausted, reset time unknown';
         return {events:[],rawEvents:0,configured:true,error:reason,retry_at:new Date(pauseUntil).toISOString()};
       }
-      if(!r.ok)return {events:[],rawEvents:0,configured:true,error:'SockOdds HTTP '+r.status};
+      if(!r.ok){
+        sockCache.until=Date.now()+SOCK_TRANSIENT_RETRY_MS;
+        return {events:[],rawEvents:0,configured:true,error:'SockOdds HTTP '+r.status};
+      }
       const json=await r.json(),rows=Array.isArray(json?.data)?json.data:[];
       rawEvents=rows.length;
       for(const ev of rows){
@@ -555,7 +560,12 @@ async function sockOdds(wide=false){
         }
       }
       return {events,rawEvents,bookmakers:[...observed],configured:true};
-    }catch(e){return {events:[],rawEvents,configured:true,error:'SockOdds request/parser: '+String(e?.message||e).slice(0,160)}}
+    }catch(e){
+      // A timeout or temporary parsing/network error must not be cached for five minutes.
+      sockCache.until=Date.now()+SOCK_TRANSIENT_RETRY_MS;
+      const timedOut=e?.name==='AbortError';
+      return {events:[],rawEvents,configured:true,error:timedOut?'SockOdds request timed out after 22 seconds (upstream slow; retry shortly)':'SockOdds request/parser: '+String(e?.message||e).slice(0,160)};
+    }
   })();
   return sockCache.promise;
 }
@@ -832,7 +842,10 @@ export default async function handler(req,res){
   }
   try{
     const data=await item.promise;
-    res.setHeader('Cache-Control','public, max-age=0, s-maxage=90');
+    if(!Number(data.active_bookmaker_count))item.expires=Math.min(item.expires,Date.now()+15*1000);
+    // Do not keep a transient all-source failure in the CDN for 90 seconds.
+    const hasQuotes=Number(data.active_bookmaker_count)>0;
+    res.setHeader('Cache-Control',hasQuotes?'public, max-age=0, s-maxage=90':'public, max-age=0, s-maxage=15');
     return res.status(200).json(debug?data:data.results);
   }catch(e){
     scanCache.delete(key);
