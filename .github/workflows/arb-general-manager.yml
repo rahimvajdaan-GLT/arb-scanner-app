@@ -106,3 +106,111 @@ jobs:
               await github.rest.issues.createComment({owner,repo,issue_number:open.number,body:'Automated blockers cleared in '+context.serverUrl+'/'+owner+'/'+repo+'/actions/runs/'+context.runId+'. Closing; manual backlog review still recommended.'});
               await github.rest.issues.update({owner,repo,issue_number:open.number,state:'closed'});
             }
+
+      - name: Coordinate a bounded, reviewable development backlog
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const {owner,repo}=context.repo;
+            const now=Date.now(),DAY=86400000;
+            const marker='<!-- top-notch-gm-v2-task -->';
+            const tasks=[
+              {
+                key:'maintenance-browser-qa',
+                owner:'Maintenance / AI Developer',
+                title:'[GM Task] Validate scanner states with quota-free browser fixtures',
+                priority:'P1',
+                scope:'Add reproducible, mocked checks for loading, no-results, feed-error, filters and mobile scanner states. Never call live bookmaker endpoints.',
+                acceptance:'A reviewed PR with focused tests and passing node --test tests/*.test.cjs, or a documented evidence-based blocker.'
+              },
+              {
+                key:'seo-navigation-audit',
+                owner:'AI SEO Developer',
+                title:'[GM Task] Audit internal links and indexable page navigation',
+                priority:'P2',
+                scope:'Review existing public HTML for broken internal links and navigation defects. Do not invent search rankings or write generic content.',
+                acceptance:'A reviewed PR with a reproduced navigation defect and tests, or a documented audit proving no fix is required.'
+              },
+              {
+                key:'product-roadmap',
+                owner:'Product Development Manager (human triage)',
+                title:'[GM Task] Define one testable scanner product milestone',
+                priority:'P2',
+                scope:'Propose a concrete product milestone grounded in existing scanner behavior, provider limits and AGENTS.md. Do not modify odds logic without a reproducible defect.',
+                acceptance:'An owner-approved issue with measurable acceptance criteria and an implementation PR when appropriate.'
+              }
+            ];
+            const open=(await github.paginate(github.rest.issues.listForRepo,{
+              owner,repo,state:'open',per_page:100
+            })).filter(i=>!i.pull_request);
+            const closed=(await github.paginate(github.rest.issues.listForRepo,{
+              owner,repo,state:'closed',per_page:100
+            })).filter(i=>!i.pull_request);
+            const prs=await github.paginate(github.rest.pulls.list,{
+              owner,repo,state:'open',per_page:100
+            });
+            const managed=tasks.map(t=>{
+              const tag=marker+' '+t.key;
+              const active=open.find(i=>i.body?.includes(tag));
+              const finished=closed.find(i=>i.body?.includes(tag));
+              return {...t,tag,active,finished};
+            });
+            // Limit automation to one new task per run and one active GM task per category.
+            const activeCount=managed.filter(t=>t.active).length;
+            const candidate=managed.find(t=>!t.active&&!t.finished);
+            if(candidate && activeCount<3){
+              const body=[
+                candidate.tag,
+                '**Priority:** '+candidate.priority,
+                '**Responsible workstream:** '+candidate.owner+' (not an assigned GitHub user)',
+                '**Proposed scope:** '+candidate.scope,
+                '**Definition of done:** '+candidate.acceptance,
+                '**Target review:** within 7 days of creation; escalate if stalled.',
+                '',
+                'Human triage required before coding. This is a task request, not proof of a defect.',
+                'Follow AGENTS.md and SEO_AGENT.md. Do not call quota-consuming bookmaker APIs.',
+                'All code/content changes require a tested PR and owner merge approval.'
+              ].join('\n');
+              await github.rest.issues.create({owner,repo,title:candidate.title,body});
+            }
+            const refreshed=(await github.paginate(github.rest.issues.listForRepo,{
+              owner,repo,state:'open',per_page:100
+            })).filter(i=>!i.pull_request&&i.body?.includes(marker));
+            const overdue=refreshed.filter(i=>now-Date.parse(i.created_at)>7*DAY);
+            const weekAgo=now-7*DAY;
+            const merged=(await github.rest.pulls.list({
+              owner,repo,state:'closed',sort:'updated',direction:'desc',per_page:100
+            })).data.filter(p=>p.merged_at&&Date.parse(p.merged_at)>=weekAgo);
+            const lines=[
+              '## General Manager v2 — Delivery accountability',
+              'Weekly targets are planning targets, not claims of delivered features.',
+              '| Measure | Verified count |',
+              '|---|---:|',
+              '| Open managed tasks | '+refreshed.length+' |',
+              '| Managed tasks overdue >7 days | '+overdue.length+' |',
+              '| Open PRs requiring review | '+prs.length+' |',
+              '| Merged PRs in 7 days (all categories) | '+merged.length+' |',
+              '',
+              '### Workstream queue',
+              ...refreshed.map(i=>'- [#'+i.number+']('+i.html_url+'): '+i.title+
+                (now-Date.parse(i.created_at)>7*DAY?' **OVERDUE**':'')),
+              '',
+              '### Weekly delivery targets',
+              '- Maintenance: resolve confirmed P1 failures before feature work.',
+              '- SEO: review at least one evidence-based technical opportunity; no invented ranking outcomes.',
+              '- Product: maintain one owner-approved, testable milestone.',
+              '- Owner: review PRs and decide merges; no auto-merge or auto-deploy.',
+              '',
+              'The supervisor creates at most one new task per run, never reopens completed tasks, and does not trigger paid AI or bookmaker calls.'
+            ];
+            await core.summary.addRaw(lines.join('\n')).write();
+            if(overdue.length){
+              const title='[General Manager] Overdue delivery tasks';
+              const overdueMarker='<!-- top-notch-gm-v2-overdue -->';
+              const existing=open.find(i=>i.title===title&&i.body?.includes(overdueMarker));
+              const body=[overdueMarker,'These tasks require owner triage; no automatic code changes:',
+                ...overdue.map(i=>'- '+i.html_url),'','No PRs are auto-merged.'].join('\n');
+              if(existing)await github.rest.issues.update({owner,repo,issue_number:existing.number,body});
+              else await github.rest.issues.create({owner,repo,title,body});
+            }
