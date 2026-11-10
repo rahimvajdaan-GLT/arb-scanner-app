@@ -90,7 +90,7 @@ jobs:
                 'Human review and approval required before merging.',
                 'Note: GitHub Actions-created PRs may not automatically trigger pull_request workflows with GITHUB_TOKEN.',
                 'If the required safety-and-matching check is absent, manually dispatch Arbitrage scanner regression tests on this branch, or use an approved GitHub App token.'
-              ].join('\\n')
+              ].join('\n')
             });
             core.info('Review PR: ' + pr.data.html_url);
         env:
