@@ -5,6 +5,15 @@ const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const SEO=require('../scripts/seo-manager.cjs');
 
 const SITE=SEO.ORIGIN;
+test('shared primary navigation stays available at mobile widths',()=>{
+ const css=fs.readFileSync(path.join(__dirname,'..','site.css'),'utf8');
+ const mobile=css.match(/@media\(max-width:900px\)\{([\s\S]*?)\}\s*@media/)?.[1];
+ assert.ok(mobile,'shared stylesheet defines a mobile layout');
+ assert.match(mobile,/\.site-nav\{[^}]*flex-wrap:wrap/,'header can wrap its navigation');
+ assert.match(mobile,/\.nav-links\{[^}]*display:flex[^}]*flex-basis:100%/,'primary links occupy a visible row');
+ assert.match(mobile,/\.nav-links a\{[^}]*min-height:44px/,'mobile links provide usable touch targets');
+ assert.doesNotMatch(css,/\.nav-links\s*\{[^}]*display\s*:\s*none/,'no breakpoint hides the primary links');
+});
 test('public scanner explanations describe positive rounded results without an unavailable value mode',()=>{
  for(const page of ['index.html','about.html','faq.html']){
   const html=fs.readFileSync(path.join(__dirname,'..',page),'utf8');
