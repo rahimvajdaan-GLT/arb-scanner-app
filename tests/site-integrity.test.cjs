@@ -67,6 +67,15 @@ test('scanner switches retain native keyboard access and a visible focus indicat
  assert.doesNotMatch(effectiveRule,/display:none|visibility:hidden/);
  assert.match(css,/\.toggle-row input:focus-visible\+\.toggle-ui\{[^}]*outline:3px solid #315fd8;outline-offset:3px/);
 });
+test('scanner respects reduced motion preferences without hiding loading feedback',()=>{
+ const css=read('site.css');
+ const reduced=css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+ assert.match(reduced,/@media \(prefers-reduced-motion: reduce\)/);
+ assert.match(reduced,/html\{scroll-behavior:auto\}/);
+ assert.match(reduced,/\.scanner-shell \*,\.scanner-shell \*::before,\.scanner-shell \*::after\{animation:none!important;transition:none!important\}/);
+ assert.doesNotMatch(reduced,/display:none|visibility:hidden|opacity:0/,'loading feedback must remain visible');
+ assert.ok(css.indexOf('html{scroll-behavior:smooth}')<css.indexOf('@media (prefers-reduced-motion: reduce)'), 'preference must override the default scroll behavior');
+});
 test('no credentials or API keys embedded in the client',()=>{
  for(const p of pages){
   const html=read(p);
