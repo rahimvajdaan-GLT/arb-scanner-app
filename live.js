@@ -351,6 +351,20 @@ async function scanLive() {
     const working=feeds.filter(p=>Number(p.events)>0);
     const errors=feeds.filter(p=>p.error);
     liveEls.status.textContent=!working.length?'● Odds sources unavailable':errors.length?'● Partial odds coverage':'● Recent bookmaker quotes · Pre-match';
+    // A healthy empty scan and an inadequate comparison sample require
+    // different actions. These counters come from the same paid scan response;
+    // never issue another provider request just to populate diagnostics.
+    if (working.length && !latestEvents.length) {
+      const sampled = Math.max(0, Number(data.merged_games) || 0);
+      const crossed = Math.max(0, Number(data.cross_book_games) || 0);
+      const comparable = Math.max(0, Number(data.comparable_markets) || 0);
+      const coverage = `${sampled} fixtures sampled · ${crossed} cross-bookmaker matches · ${comparable} comparable markets`;
+      const reason = comparable === 0
+        ? 'Coverage is insufficient to evaluate a profitable arbitrage in this sample.'
+        : 'Comparable prices were checked, but no positive rounded-stake arbitrage was found.';
+      liveEls.message.textContent = `${reason} ${coverage}.`;
+      liveEls.results.innerHTML = `<div class="no-results"><strong>No verified positive opportunities in this scan</strong><span>${reason} ${coverage}. Other fixtures may remain unchecked.</span></div>`;
+    }
     if (!working.length) {
       liveEls.metricCount.textContent = '—';
       liveEls.metricBestRoi.textContent = '—';

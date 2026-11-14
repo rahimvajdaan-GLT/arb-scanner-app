@@ -68,6 +68,26 @@ test('mocked rate-limited providers are distinguished from a healthy empty scan'
  assert.equal(ui.requests.length,1,'rate limits must not trigger an immediate retry');
 });
 
+test('empty scan explains insufficient cross-bookmaker coverage without another API call',async()=>{
+ const ui=scanner();
+ const pending=ui.scan();
+ ui.respond({results:[],merged_games:18,cross_book_games:0,comparable_markets:0,providers:[{events:18}]});
+ await pending;
+ assert.match(ui.get('liveMessage').textContent,/Coverage is insufficient/);
+ assert.match(ui.get('liveResults').innerHTML,/18 fixtures sampled · 0 cross-bookmaker matches/);
+ assert.equal(ui.requests.length,1);
+});
+
+test('empty scan with comparable markets correctly reports no positive arbitrage',async()=>{
+ const ui=scanner();
+ const pending=ui.scan();
+ ui.respond({results:[],merged_games:12,cross_book_games:4,comparable_markets:3,providers:[{events:12}]});
+ await pending;
+ assert.match(ui.get('liveMessage').textContent,/no positive rounded-stake arbitrage/);
+ assert.match(ui.get('liveResults').innerHTML,/3 comparable markets/);
+ assert.equal(ui.requests.length,1);
+});
+
 test('mocked scan failure clears loading and metrics, escapes errors and permits retry',async()=>{
  const ui=scanner();
  const pending=ui.scan();
