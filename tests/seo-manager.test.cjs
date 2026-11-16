@@ -97,3 +97,16 @@ test('real website metadata produces useful sitemap including bookmaker connecti
  assert.ok(!r.included.includes('login.html'));
  assert.deepEqual(r.warnings,[],'fix factual page metadata rather than silently excluding intended pages');
 });
+
+test('404 recovery navigation identifies Top Notch Arb and retains working destinations',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'..','404.html'),'utf8');
+ assert.match(html,/<title>Page Not Found \| Top Notch Arb<\/title>/);
+ assert.match(html,/<a class="site-brand" href="\/"><span class="site-logo">TNA<\/span>Top Notch Arb<\/a>/);
+ assert.match(html,/<a[^>]*href="\/">Back to Top Notch Arb<\/a>/);
+ assert.match(html,/<a[^>]*href="\/scanner\.html">Open Scanner<\/a>/);
+ assert.match(html,/<meta name="robots" content="noindex">/);
+ assert.doesNotMatch(html,/Kaka Arb/);
+ for(const page of ['index.html','scanner.html']){
+  assert.ok(fs.existsSync(path.join(__dirname,'..',page)),page+' recovery destination exists');
+ }
+});
