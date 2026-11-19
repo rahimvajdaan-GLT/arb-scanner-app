@@ -41,8 +41,7 @@ Solve reproducible defects, keep the app stable, and use pull requests for chang
   requiring code review and passing tests.
 - **AI SEO Manager:** `SEO_AGENT.md` defines truthful technical SEO and editing
   rules. `.github/workflows/arb-seo-manager.yml` audits indexable metadata
-  every day and when HTML pages change. It **may safely auto-publish only**
-  deterministic `sitemap.xml` / `robots.txt` corrections after tests pass.
+  every day and when HTML pages change. It **proposes deterministic `sitemap.xml` / `robots.txt` corrections in a draft pull request** after metadata auditing and tests pass. A human must approve and merge the PR; the workflow does not auto-publish.
   `.github/workflows/arb-ai-seo.yml` can suggest on-page improvements by
   pull request, only when the optional paid API secret is configured.
 - Vercel deploys reviewed code merged to `main`. Never auto-merge agent-written
