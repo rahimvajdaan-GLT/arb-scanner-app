@@ -34,7 +34,7 @@ You work alongside the reliability developer defined in `AGENTS.md`.
 - `scripts/seo-manager.cjs --apply` produces `sitemap.xml` and `robots.txt`
   deterministically from actual public pages.
 - `.github/workflows/arb-seo-manager.yml` runs every day and when page HTML
-  changes. It commits only changed sitemap/robots files after passing tests.
+  changes. It commits only changed sitemap/robots files to a dedicated branch after passing tests, then opens a draft pull request for human review and merge. It never auto-publishes to `main`.
 - When an SEO metadata problem needs human editorial review, open one GitHub issue.
 
 ## AI SEO development workflow (optional paid model API)
