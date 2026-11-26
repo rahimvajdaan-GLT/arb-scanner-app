@@ -82,3 +82,11 @@ test('no credentials or API keys embedded in the client',()=>{
   assert.doesNotMatch(html,/SOCKODDS_API_KEY|KAKA_ARB_AUTH_SECRET/,'Do not expose secrets in '+p);
  }
 });
+
+test('scanner navigation landmarks have distinct accessible names',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../scanner.html'),'utf8');
+ assert.deepEqual(
+  Array.from(html.matchAll(/<nav\b[^>]*>/g),([tag])=>tag.match(/\baria-label="([^"]+)"/)?.[1]),
+  ['Site','Scanner sections']
+ );
+});
